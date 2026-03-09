@@ -2,7 +2,7 @@
 # Usage: iwr -useb https://raw.githubusercontent.com/nahuelcio/ado-cli/main/install.ps1 | iex
 
 param(
-    [string]$Version = "v0.1.0",
+    [string]$Version = "v0.1.2",
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\ado",
     [switch]$AddToPath = $true
 )

@@ -7,7 +7,7 @@ set -e
 REPO="nahuelcio/ado-cli"
 BINARY_NAME="ado"
 INSTALL_DIR="/usr/local/bin"
-VERSION="${VERSION:-v0.1.0}"
+VERSION="v0.1.2"
 
 # Colors
 RED='\033[0;31m'
@@ -123,7 +123,7 @@ main() {
 while [[ $# -gt 0 ]]; do
     case $1 in
         --version)
-            VERSION="$2"
+            VERSION="v0.1.2"
             shift 2
             ;;
         --install-dir)
