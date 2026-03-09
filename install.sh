@@ -50,7 +50,7 @@ detect_platform() {
 get_latest_version() {
     if [ "$VERSION" = "latest" ]; then
         echo "Fetching latest version..."
-        VERSION=$(curl -fsSIL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed -E 's#.*/tag/([^/]+)$#\1#')
+        VERSION=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed -E 's#.*/tag/([^/]+)$#\1#')
         if [ -z "$VERSION" ]; then
             echo -e "${RED}Error: Could not fetch latest version${NC}"
             exit 1

@@ -52,7 +52,7 @@ function Get-LatestVersion {
     if ($Version -eq "latest") {
         Write-Host "Fetching latest version..."
         try {
-            $latestUrl = curl.exe -fsSIL -o NUL -w "%{url_effective}" "https://github.com/$Repo/releases/latest"
+            $latestUrl = curl.exe -fsSL -o NUL -w "%{url_effective}" "https://github.com/$Repo/releases/latest"
             if (-not $latestUrl) {
                 Fail-Install "Could not resolve latest release URL"
             }
