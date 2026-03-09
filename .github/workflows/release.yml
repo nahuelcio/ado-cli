@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-amd64
+            binary: ado
+            archive: ado-linux-amd64.tar.gz
+          - os: ubuntu-latest
+            target: linux-arm64
+            binary: ado
+            archive: ado-linux-arm64.tar.gz
+          - os: macos-latest
+            target: darwin-amd64
+            binary: ado
+            archive: ado-darwin-amd64.tar.gz
+          - os: macos-latest
+            target: darwin-arm64
+            binary: ado
+            archive: ado-darwin-arm64.tar.gz
+          - os: windows-latest
+            target: windows-amd64
+            binary: ado.exe
+            archive: ado-windows-amd64.zip
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+
+    - name: Build Linux AMD64
+      if: matrix.target == 'linux-amd64'
+      run: |
+        GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ${{ matrix.binary }} ./cmd/main.go
+        tar czf ${{ matrix.archive }} ${{ matrix.binary }}
+
+    - name: Build Linux ARM64
+      if: matrix.target == 'linux-arm64'
+      run: |
+        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ${{ matrix.binary }} ./cmd/main.go
+        tar czf ${{ matrix.archive }} ${{ matrix.binary }}
+
+    - name: Build Darwin AMD64
+      if: matrix.target == 'darwin-amd64'
+      run: |
+        GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ${{ matrix.binary }} ./cmd/main.go
+        tar czf ${{ matrix.archive }} ${{ matrix.binary }}
+
+    - name: Build Darwin ARM64
+      if: matrix.target == 'darwin-arm64'
+      run: |
+        GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ${{ matrix.binary }} ./cmd/main.go
+        tar czf ${{ matrix.archive }} ${{ matrix.binary }}
+
+    - name: Build Windows AMD64
+      if: matrix.target == 'windows-amd64'
+      run: |
+        go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ${{ matrix.binary }} ./cmd/main.go
+        Compress-Archive -Path ${{ matrix.binary }} -DestinationPath ${{ matrix.archive }}
+      shell: pwsh
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.target }}
+        path: ${{ matrix.archive }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: artifacts/**/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-install-scripts:
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Update install scripts version
+      run: |
+        VERSION=${{ github.ref_name }}
+        sed -i "s/VERSION=\".*\"/VERSION=\"$VERSION\"/g" install.sh
+        sed -i "s/\$VERSION = \".*\"/\$VERSION = \"$VERSION\"/g" install.ps1
+    
+    - name: Commit install scripts
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add install.sh install.ps1
+        git diff --quiet && git diff --staged --quiet || git commit -m "Update install scripts to $VERSION"
+        git push

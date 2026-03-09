@@ -1,0 +1,61 @@
+project_name: ado
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: ado
+    binary: ado
+    goos:
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    goarm:
+      - 6
+    windows:
+      - buildmode: exe
+    linux:
+      - buildmode: deb
+      - buildmode: rpm
+    darwin:
+      - buildmode: tar.gz
+
+archives:
+  - format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+release:
+  github:
+    owner: your-org
+    name: azure-devops-cli
+  draft: true
+
+dockers:
+  - image_templates:
+      - "your-org/azure-devops-cli:{{ .Tag }}"
+      - "your-org/azure-devops-cli:latest"
+    goos: linux
+    goarch: amd64
