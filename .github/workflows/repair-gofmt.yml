@@ -28,4 +28,5 @@ jobs:
         git config --local user.name "GitHub Action"
         git add .
         git diff --quiet && git diff --staged --quiet || git commit -m "chore: run gofmt"
-        git push
+        git pull --rebase origin main
+        git push origin HEAD:main
