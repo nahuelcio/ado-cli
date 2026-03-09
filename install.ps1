@@ -52,8 +52,11 @@ function Get-LatestVersion {
     if ($Version -eq "latest") {
         Write-Host "Fetching latest version..."
         try {
-            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
-            $script:Version = $release.tag_name
+            $latestUrl = curl.exe -fsSIL -o NUL -w "%{url_effective}" "https://github.com/$Repo/releases/latest"
+            if (-not $latestUrl) {
+                Fail-Install "Could not resolve latest release URL"
+            }
+            $script:Version = [System.IO.Path]::GetFileName($latestUrl.TrimEnd('/'))
         }
         catch {
             Fail-Install "Could not fetch latest version"
