@@ -226,6 +226,4 @@ func init() {
 	profileCmd.AddCommand(profileDeleteCmd)
 	profileCmd.AddCommand(profileShowCmd)
 	profileCmd.AddCommand(profileUseCmd)
-
-	rootCmd.AddCommand(profileCmd)
 }

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -162,12 +161,19 @@ var authTestCmd = &cobra.Command{
 		}
 
 		if pat == "" {
-			fmt.Println("No credentials found. Please run 'ado auth login' first.")
-			os.Exit(1)
+			if profile.Auth.PAT != "" && profile.Auth.PAT != "***" {
+				fmt.Printf("Connection test successful for profile '%s'\n", profileName)
+				fmt.Printf("Organization: %s\n", profile.Organization)
+				fmt.Println("Credential backend: config")
+				return nil
+			} else {
+				return fmt.Errorf("no credentials found for profile %q. Run 'ado auth login --profile %s' or set AZURE_DEVOPS_PAT", profileName, profileName)
+			}
 		}
 
 		fmt.Printf("Connection test successful for profile '%s'\n", profileName)
 		fmt.Printf("Organization: %s\n", profile.Organization)
+		fmt.Printf("Credential backend: %s\n", credManager.GetBackend())
 		return nil
 	},
 }
@@ -183,6 +189,4 @@ func init() {
 	authCmd.AddCommand(authLoginCmd)
 	authCmd.AddCommand(authLogoutCmd)
 	authCmd.AddCommand(authTestCmd)
-
-	rootCmd.AddCommand(authCmd)
 }

@@ -2,10 +2,12 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/nahuelcio/ado-cli/internal/api"
 	"github.com/nahuelcio/ado-cli/internal/auth"
 	"github.com/nahuelcio/ado-cli/internal/config"
 	"github.com/spf13/cobra"
@@ -19,17 +21,7 @@ var setupCmd = &cobra.Command{
 This command will guide you through:
 - Creating a new profile
 - Setting up authentication with PAT
-- Configuring default settings
-
-Example:
-  ado setup
-  
-The setup will prompt you for:
-1. Profile name
-2. Organization URL (e.g., https://dev.azure.com/myorg)
-3. Project name
-4. Personal Access Token (PAT)
-5. Whether to set as default profile`,
+- Configuring default settings`,
 	RunE: runSetup,
 }
 
@@ -46,7 +38,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	orgURL, err := promptRequired(reader, "Organization URL (e.g., https://dev.azure.com/myorg): ", "organization URL")
+	orgURL, err := promptRequired(reader, "Organization URL or name (e.g., myorg or https://dev.azure.com/myorg): ", "organization URL")
 	if err != nil {
 		return err
 	}
@@ -71,12 +63,14 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	if err := saveSetupProfile(loader, profileName, profile, setAsDefault); err != nil {
 		return err
 	}
-	if err := persistSetupPAT(loader, profileName, &profile, orgURL, pat); err != nil {
+
+	credentialState, err := persistSetupPAT(loader, profileName, &profile, orgURL, pat)
+	if err != nil {
 		return err
 	}
 
-	printSetupConnectionResult(orgURL, projectName, pat)
-	printSetupSuccess(profileName, setAsDefault)
+	connectionOK := printSetupConnectionResult(orgURL, projectName, pat)
+	printSetupSuccess(profileName, setAsDefault, credentialState, connectionOK)
 	return nil
 }
 
@@ -86,6 +80,7 @@ func printSetupBanner() {
 	fmt.Println("========================================================")
 	fmt.Println()
 	fmt.Println("This wizard will help you configure the CLI.")
+	fmt.Println("You can enter either an organization name or a full URL.")
 	fmt.Println("Press Ctrl+C at any time to cancel.")
 	fmt.Println()
 }
@@ -110,14 +105,15 @@ func promptRequired(reader *bufio.Reader, prompt, fieldName string) (string, err
 
 func promptPAT(reader *bufio.Reader) (string, error) {
 	fmt.Println()
-	fmt.Println("Personal Access Token (PAT) - Get yours at:")
-	fmt.Println("  https://dev.azure.com/[org]/_usersSettings/tokens")
+	fmt.Println("Personal Access Token (PAT)")
+	fmt.Println("  Create one at: https://dev.azure.com/[org]/_usersSettings/tokens")
 	fmt.Println("  Required scopes: Code (read), Work Items (read/write), Project (read)")
 	return promptRequired(reader, "Enter your PAT: ", "PAT")
 }
 
 func normalizeOrganizationURL(orgURL string) string {
-	if strings.HasPrefix(orgURL, "http") {
+	orgURL = strings.TrimSpace(strings.TrimSuffix(orgURL, "/"))
+	if strings.HasPrefix(orgURL, "http://") || strings.HasPrefix(orgURL, "https://") {
 		return orgURL
 	}
 	return "https://dev.azure.com/" + orgURL
@@ -165,71 +161,79 @@ func saveSetupProfile(loader *config.ConfigLoader, profileName string, profile c
 	return nil
 }
 
-func persistSetupPAT(loader *config.ConfigLoader, profileName string, profile *config.Profile, orgURL, pat string) error {
+func persistSetupPAT(loader *config.ConfigLoader, profileName string, profile *config.Profile, orgURL, pat string) (string, error) {
 	credManager, err := auth.NewCredentialManager("")
 	if err != nil {
-		return fmt.Errorf("failed to create credential manager: %w", err)
+		return "", fmt.Errorf("failed to create credential manager: %w", err)
 	}
 
-	err = credManager.SavePAT(auth.ServicePAT, extractOrgName(orgURL), pat)
-	if err == nil {
-		return nil
+	if err := credManager.SavePAT(auth.ServicePAT, orgURL, pat); err == nil {
+		storedPAT, getErr := credManager.GetPAT(auth.ServicePAT, orgURL)
+		if getErr != nil {
+			return "", fmt.Errorf("saved PAT but failed to verify credential storage: %w", getErr)
+		}
+		if storedPAT == "" {
+			return "", fmt.Errorf("saved PAT but could not read it back from %s storage", credManager.GetBackend())
+		}
+		return credManager.GetBackend(), nil
 	}
 
-	fmt.Printf("Warning: Could not save to system keyring: %v\n", err)
-	fmt.Println("PAT will be stored in config file (less secure)")
+	fmt.Println("Warning: Secure credential storage is unavailable in this environment.")
+	fmt.Println("Falling back to local config storage for this profile.")
 	profile.Auth.PAT = pat
 	loader.SetProfile(profileName, *profile)
 	if err := loader.Save(); err != nil {
-		return fmt.Errorf("failed to save fallback profile: %w", err)
+		return "", fmt.Errorf("failed to save fallback profile: %w", err)
 	}
-	return nil
+	return "config", nil
 }
 
-func printSetupConnectionResult(orgURL, projectName, pat string) {
+func printSetupConnectionResult(orgURL, projectName, pat string) bool {
 	fmt.Println("Testing connection to Azure DevOps...")
 	if err := testConnection(orgURL, projectName, pat); err != nil {
 		fmt.Printf("Warning: Connection test failed: %v\n", err)
-		fmt.Println("The profile was created, but there might be an issue with your credentials.")
-		return
+		fmt.Println("The profile was created, but you should verify auth with 'ado auth test'.")
+		return false
 	}
 
 	fmt.Println("Connection successful!")
+	return true
 }
 
-func printSetupSuccess(profileName string, setAsDefault bool) {
+func printSetupSuccess(profileName string, setAsDefault bool, credentialState string, connectionOK bool) {
 	fmt.Println()
 	fmt.Println("========================================================")
-	fmt.Println(" Setup Complete!")
+	fmt.Println(" Setup Complete")
 	fmt.Println("========================================================")
 	fmt.Println()
 	fmt.Printf("Profile '%s' created successfully!\n", profileName)
 	if setAsDefault {
 		fmt.Println("This profile is set as default.")
 	}
+	fmt.Printf("Credential storage: %s\n", credentialState)
+	if credentialState == "config" {
+		fmt.Println("Warning: PAT is stored in local config fallback storage.")
+	}
 	fmt.Println()
 	fmt.Println("Quick start commands:")
+	fmt.Printf("  ado auth test --profile %s\n", profileName)
 	fmt.Printf("  ado work-item list --profile %s\n", profileName)
 	fmt.Printf("  ado pr list --profile %s --repo <repo-name>\n", profileName)
+	if !connectionOK {
+		fmt.Println()
+		fmt.Println("Verify the connection before continuing.")
+	}
 	fmt.Println()
 	fmt.Println("For help: ado --help")
 }
 
-func extractOrgName(orgURL string) string {
-	orgURL = strings.TrimSuffix(orgURL, "/")
-	parts := strings.Split(orgURL, "/")
-	if len(parts) > 0 {
-		return parts[len(parts)-1]
-	}
-	return orgURL
-}
-
 func testConnection(orgURL, project, pat string) error {
-	// Simple HTTP test - we'll just try to get projects list
-	// This is a basic connectivity test
+	client, err := api.NewAzureDevOpsClient(api.NewConnectionConfig(orgURL, project, pat))
+	if err != nil {
+		return fmt.Errorf("failed to create API client: %w", err)
+	}
+	if err := client.ValidateConnection(context.Background()); err != nil {
+		return err
+	}
 	return nil
-}
-
-func init() {
-	rootCmd.AddCommand(setupCmd)
 }

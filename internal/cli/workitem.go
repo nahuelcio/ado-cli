@@ -464,8 +464,6 @@ func init() {
 	workItemCmd.AddCommand(workItemFieldCmd)
 	workItemCmd.AddCommand(workItemStateCmd)
 	workItemCmd.AddCommand(workItemUpdateCmd)
-
-	rootCmd.AddCommand(workItemCmd)
 }
 
 func init() {

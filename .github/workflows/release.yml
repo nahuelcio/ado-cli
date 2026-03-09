@@ -107,28 +107,3 @@ jobs:
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  update-install-scripts:
-    needs: release
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Update install scripts version
-      run: |
-        VERSION=${{ github.ref_name }}
-        sed -i "s/VERSION=\".*\"/VERSION=\"$VERSION\"/g" install.sh
-        sed -i "s/\$Version = \".*\"/\$Version = \"$VERSION\"/g" install.ps1
-    
-    - name: Commit install scripts
-      run: |
-        VERSION=${{ github.ref_name }}
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add install.sh install.ps1
-        git diff --quiet && git diff --staged --quiet || git commit -m "Update install scripts to $VERSION"
-        git push origin HEAD:main

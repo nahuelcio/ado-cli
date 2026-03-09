@@ -2,7 +2,7 @@
 # Usage: iwr -useb https://raw.githubusercontent.com/nahuelcio/ado-cli/main/install.ps1 | iex
 
 param(
-    [string]$Version = "v0.1.2",
+    [string]$Version = "latest",
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\ado",
     [switch]$AddToPath = $true
 )
@@ -11,7 +11,6 @@ $ErrorActionPreference = "Stop"
 $Repo = "nahuelcio/ado-cli"
 $BinaryName = "ado.exe"
 
-# Colors for output
 function Write-ColorOutput($ForegroundColor) {
     $fc = $host.UI.RawUI.ForegroundColor
     $host.UI.RawUI.ForegroundColor = $ForegroundColor
@@ -22,32 +21,33 @@ function Write-ColorOutput($ForegroundColor) {
 }
 
 function Write-Success($message) {
-    Write-ColorOutput Green "✓ $message"
+    Write-ColorOutput Green "[ok] $message"
 }
 
 function Write-Error($message) {
-    Write-ColorOutput Red "✗ $message"
+    Write-ColorOutput Red "[error] $message"
 }
 
 function Write-Warning($message) {
     Write-ColorOutput Yellow "! $message"
 }
 
-# Detect architecture
+function Fail-Install($message) {
+    throw $message
+}
+
 function Get-Architecture {
     $arch = (Get-WmiObject -Class Win32_Processor).Architecture
     switch ($arch) {
-        0 { return "amd64" }  # x86
-        9 { return "amd64" }  # x64
-        12 { return "arm64" } # ARM64
-        default { 
-            Write-Error "Unsupported architecture: $arch"
-            exit 1
+        0 { return "amd64" }
+        9 { return "amd64" }
+        12 { return "arm64" }
+        default {
+            Fail-Install "Unsupported architecture: $arch"
         }
     }
 }
 
-# Get latest version
 function Get-LatestVersion {
     if ($Version -eq "latest") {
         Write-Host "Fetching latest version..."
@@ -56,61 +56,56 @@ function Get-LatestVersion {
             $script:Version = $release.tag_name
         }
         catch {
-            Write-Error "Could not fetch latest version"
-            exit 1
+            Fail-Install "Could not fetch latest version"
         }
     }
     Write-Success "Installing $BinaryName $Version"
 }
 
-# Download and install
 function Install-Binary {
     $arch = Get-Architecture
-    $target = "windows-amd64"
+    $target = "windows-$arch"
     $downloadUrl = "https://github.com/$Repo/releases/download/$Version/ado-$target.zip"
     $tempDir = Join-Path $env:TEMP ([System.Guid]::NewGuid().ToString())
-    
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
     Write-Host "Downloading from $downloadUrl..."
     try {
         Invoke-WebRequest -Uri $downloadUrl -OutFile "$tempDir\$BinaryName.zip"
     }
     catch {
-        Write-Error "Failed to download: $_"
-        exit 1
+        Fail-Install "Failed to download: $_"
     }
-    
+
     Write-Host "Extracting..."
     Expand-Archive -Path "$tempDir\$BinaryName.zip" -DestinationPath $tempDir -Force
-    
+
     Write-Host "Installing to $InstallDir..."
     if (!(Test-Path $InstallDir)) {
         New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     }
-    
+
     $sourcePath = Join-Path $tempDir $BinaryName
     $destPath = Join-Path $InstallDir $BinaryName
-    
-    # Close any running instances
+
     $process = Get-Process -Name "ado" -ErrorAction SilentlyContinue
     if ($process) {
         Write-Warning "Closing running ado process..."
         $process | Stop-Process -Force
         Start-Sleep -Seconds 1
     }
-    
+
     Move-Item -Path $sourcePath -Destination $destPath -Force
     Remove-Item -Path $tempDir -Recurse -Force
-    
-    # Add to PATH if requested
+
     if ($AddToPath) {
         Add-ToPath
     }
 }
 
-# Add to PATH
 function Add-ToPath {
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    
+
     if ($currentPath -notlike "*$InstallDir*") {
         Write-Host "Adding to PATH..."
         [Environment]::SetEnvironmentVariable("Path", "$currentPath;$InstallDir", "User")
@@ -122,10 +117,9 @@ function Add-ToPath {
     }
 }
 
-# Verify installation
 function Verify-Installation {
     $binaryPath = Join-Path $InstallDir $BinaryName
-    
+
     if (Test-Path $binaryPath) {
         try {
             $installedVersion = & $binaryPath --version 2>$null
@@ -136,39 +130,36 @@ function Verify-Installation {
         catch {
             $installedVersion = "unknown"
         }
-        
+
         Write-Success "Successfully installed $BinaryName"
         Write-Host "  Version: $installedVersion"
         Write-Host "  Location: $binaryPath"
         Write-Host ""
         Write-Host "Quick start:"
+        Write-Host "  ado setup"
         Write-Host "  ado --help"
-        Write-Host "  ado profile add --name myorg --org https://dev.azure.com/myorg --project myproject"
-        Write-Host "  ado auth login --profile myorg"
+        Write-Host "  ado auth test --profile myorg"
         Write-Host ""
-        
+
         if ($AddToPath) {
             Write-Host "NOTE: Please restart your terminal or run 'refreshenv' to use the 'ado' command"
         }
     }
     else {
-        Write-Error "Installation failed - binary not found"
-        exit 1
+        Fail-Install "Installation failed - binary not found"
     }
 }
 
-# Main
 function Main {
     Write-Host "Azure DevOps CLI Installer for Windows"
     Write-Host "======================================"
     Write-Host ""
-    
+
     Get-LatestVersion
     Install-Binary
     Verify-Installation
 }
 
-# Show help
 if ($args -contains "--help" -or $args -contains "-h") {
     Write-Host "Usage: install.ps1 [OPTIONS]"
     Write-Host ""
@@ -179,10 +170,15 @@ if ($args -contains "--help" -or $args -contains "-h") {
     Write-Host "  -Help                   Show this help message"
     Write-Host ""
     Write-Host "Examples:"
-    Write-Host '  iwr -useb https://raw.githubusercontent.com/your-org/azure-devops-cli/main/install.ps1 | iex'
+    Write-Host '  iwr -useb https://raw.githubusercontent.com/nahuelcio/ado-cli/main/install.ps1 | iex'
     Write-Host '  iwr -useb ... | iex -Version v1.0.0'
     Write-Host '  iwr -useb ... | iex -InstallDir "C:\Tools"'
-    exit 0
+    return
 }
 
-Main
+try {
+    Main
+}
+catch {
+    Write-Error $_
+}

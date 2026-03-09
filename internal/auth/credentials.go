@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,6 +66,7 @@ func NewCredentialManager(storageDir string) (*CredentialManager, error) {
 }
 
 func (c *CredentialManager) SavePAT(service, account, pat string) error {
+	account = CredentialAccount(account)
 	key := c.makeKey(service, account)
 	if c.backend == "keyring" {
 		err := c.ring.Set(keyring.Item{
@@ -81,10 +83,14 @@ func (c *CredentialManager) SavePAT(service, account, pat string) error {
 }
 
 func (c *CredentialManager) GetPAT(service, account string) (string, error) {
+	account = CredentialAccount(account)
 	key := c.makeKey(service, account)
 	if c.backend == "keyring" {
 		item, err := c.ring.Get(key)
 		if err != nil {
+			if legacyPAT, legacyErr := c.getLegacyPAT(service, account); legacyErr == nil && legacyPAT != "" {
+				return legacyPAT, nil
+			}
 			if isKeyringNotFoundError(err) {
 				return "", nil
 			}
@@ -92,19 +98,37 @@ func (c *CredentialManager) GetPAT(service, account string) (string, error) {
 		}
 		return string(item.Data), nil
 	}
-	return c.getFromFileStorage(service, account)
+
+	pat, err := c.getFromFileStorage(service, account)
+	if err != nil || pat != "" {
+		return pat, err
+	}
+	return c.getLegacyPAT(service, account)
 }
 
 func (c *CredentialManager) DeletePAT(service, account string) error {
-	key := c.makeKey(service, account)
+	normalizedAccount := CredentialAccount(account)
+	key := c.makeKey(service, normalizedAccount)
 	if c.backend == "keyring" {
 		err := c.ring.Remove(key)
 		if err != nil && !isKeyringNotFoundError(err) {
 			return fmt.Errorf("failed to delete credential via keyring: %w", err)
 		}
+
+		legacyKey := c.makeKey(service, account)
+		if legacyKey != key {
+			_ = c.ring.Remove(legacyKey)
+		}
 		return nil
 	}
-	return c.deleteFromFileStorage(service, account)
+
+	if err := c.deleteFromFileStorage(service, normalizedAccount); err != nil {
+		return err
+	}
+	if account != normalizedAccount {
+		return c.deleteFromFileStorage(service, account)
+	}
+	return nil
 }
 
 func (c *CredentialManager) makeKey(service, account string) string {
@@ -240,4 +264,72 @@ func isKeyringNotFoundError(err error) bool {
 	}
 
 	return false
+}
+
+func CredentialAccount(account string) string {
+	account = strings.TrimSpace(account)
+	account = strings.TrimSuffix(account, "/")
+	if account == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(account, "http://") || strings.HasPrefix(account, "https://") {
+		parsed, err := url.Parse(account)
+		if err == nil {
+			host := strings.ToLower(parsed.Hostname())
+			path := strings.Trim(parsed.Path, "/")
+
+			if host == "dev.azure.com" && path != "" {
+				parts := strings.Split(path, "/")
+				return parts[0]
+			}
+
+			if strings.HasSuffix(host, ".visualstudio.com") {
+				return strings.TrimSuffix(host, ".visualstudio.com")
+			}
+		}
+	}
+
+	return account
+}
+
+func (c *CredentialManager) getLegacyPAT(service, account string) (string, error) {
+	if account == "" {
+		return "", nil
+	}
+
+	legacyAccounts := []string{
+		account,
+		"https://dev.azure.com/" + account,
+		"https://" + account + ".visualstudio.com",
+		"https://" + account + ".visualstudio.com/",
+	}
+
+	for _, legacyAccount := range legacyAccounts {
+		if legacyAccount == CredentialAccount(legacyAccount) {
+			continue
+		}
+
+		key := c.makeKey(service, legacyAccount)
+		if c.backend == "keyring" {
+			item, err := c.ring.Get(key)
+			if err == nil {
+				return string(item.Data), nil
+			}
+			if err != nil && !isKeyringNotFoundError(err) {
+				return "", fmt.Errorf("failed to get legacy credential via keyring: %w", err)
+			}
+			continue
+		}
+
+		pat, err := c.getFromFileStorage(service, legacyAccount)
+		if err != nil {
+			return "", err
+		}
+		if pat != "" {
+			return pat, nil
+		}
+	}
+
+	return "", nil
 }

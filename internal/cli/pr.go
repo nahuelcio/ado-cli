@@ -50,7 +50,11 @@ func getPRClient(cmd *cobra.Command) (api.PullRequestClient, *config.ConfigLoade
 		return nil, nil, fmt.Errorf("project not configured. Use --profile or set AZURE_DEVOPS_PROJECT")
 	}
 	if prRepo == "" {
-		return nil, nil, fmt.Errorf("repository not configured. Use --repo flag or set AZURE_DEVOPS_REPO")
+		activeProfile := cfg.GetActiveProfileName()
+		if activeProfile == "" {
+			activeProfile = "<profile>"
+		}
+		return nil, nil, fmt.Errorf("repository not configured. Use --repo <repo-name> or set AZURE_DEVOPS_REPO. Example: ado pr list --profile %s --repo my-repo", activeProfile)
 	}
 
 	token := auth.PAT
@@ -474,8 +478,6 @@ func init() {
 	prCmd.AddCommand(prThreadsCmd)
 	prCmd.AddCommand(prSummaryCmd)
 	prCmd.AddCommand(prReviewCmd)
-
-	rootCmd.AddCommand(prCmd)
 }
 
 func init() {
