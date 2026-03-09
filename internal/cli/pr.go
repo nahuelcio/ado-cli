@@ -204,8 +204,34 @@ func truncateString(s string, maxLen int) string {
 
 var prCmd = &cobra.Command{
 	Use:   "pr",
-	Short: "Manage Azure DevOps pull requests",
-	Long:  `Commands to list, view, and manage pull requests in Azure DevOps.`,
+	Short: "Manage Azure DevOps pull requests (list, review, view changes)",
+	Long: `Manage pull requests in Azure DevOps.
+
+This command group provides comprehensive PR management including:
+- Listing pull requests with status filters (active, completed, abandoned)
+- Viewing detailed PR information and metadata
+- Examining code changes and file diffs
+- Reading and creating review threads/comments
+- Getting PR summaries for quick overview
+
+Examples:
+  # List active pull requests
+  ado pr list --repo myrepo --status active
+
+  # Show PR details
+  ado pr show --repo myrepo --pr-id 456
+
+  # View all changes in a PR
+  ado pr changes --repo myrepo --pr-id 456
+
+  # View all discussion threads
+  ado pr threads --repo myrepo --pr-id 456
+
+  # Get a quick summary
+  ado pr summary --repo myrepo --pr-id 456
+
+  # Add a review comment
+  ado pr review --repo myrepo --pr-id 456 --comment "LGTM!" --status approved`,
 }
 
 var prListCmd = &cobra.Command{

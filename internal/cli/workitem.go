@@ -131,8 +131,33 @@ func getStringField(fields map[string]interface{}, key string) string {
 
 var workItemCmd = &cobra.Command{
 	Use:   "work-item",
-	Short: "Manage Azure DevOps work items",
-	Long:  `Commands to list, get, create, and manage work items in Azure DevOps.`,
+	Short: "Manage Azure DevOps work items (create, read, update, comment)",
+	Long: `Manage work items in Azure DevOps.
+
+This command group provides full CRUD operations for work items including:
+- Listing work items with filters (state, type, assignee)
+- Getting detailed information about specific work items
+- Creating new work items (Tasks, Bugs, Features, etc.)
+- Adding comments and discussions
+- Updating fields and changing states
+
+Common work item types: Task, Bug, Feature, Epic, User Story
+
+Examples:
+  # List active tasks
+  ado work-item list --state Active --type Task
+
+  # Get work item details in JSON format
+  ado work-item get --id 123 --format json
+
+  # Create a new bug
+  ado work-item create --title "Login button not working" --type Bug
+
+  # Add a comment
+  ado work-item comment --id 123 --text "Fixed in commit abc123"
+
+  # Change state to Resolved
+  ado work-item state --id 123 --state Resolved`,
 }
 
 var workItemListCmd = &cobra.Command{

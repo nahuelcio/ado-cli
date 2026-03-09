@@ -49,13 +49,13 @@ changelog:
 
 release:
   github:
-    owner: your-org
-    name: azure-devops-cli
+    owner: nahuelcio
+    name: ado-cli
   draft: true
 
 dockers:
   - image_templates:
-      - "your-org/azure-devops-cli:{{ .Tag }}"
-      - "your-org/azure-devops-cli:latest"
+      - "nahuelcio/ado-cli:{{ .Tag }}"
+      - "nahuelcio/ado-cli:latest"
     goos: linux
     goarch: amd64

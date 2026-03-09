@@ -1,4 +1,4 @@
-module github.com/your-org/azure-devops-cli
+module github.com/nahuelcio/ado-cli
 
 go 1.21
 

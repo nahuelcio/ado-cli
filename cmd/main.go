@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/your-org/azure-devops-cli/internal/cli"
+	"github.com/nahuelcio/ado-cli/internal/cli"
 )
 
 var version = "dev"

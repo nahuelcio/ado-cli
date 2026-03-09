@@ -13,8 +13,75 @@ var cfgFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "ado",
-	Short: "Azure DevOps CLI",
-	Long:  `A CLI tool for interacting with Azure DevOps.`,
+	Short: "Azure DevOps CLI - Manage work items and pull requests",
+	Long: `Azure DevOps CLI (ado) - A command-line interface for Azure DevOps
+
+DESCRIPTION:
+  ado is a CLI tool for interacting with Azure DevOps services. It provides
+  comprehensive commands to manage work items, pull requests, and authentication.
+  The tool supports multiple profiles for different organizations/projects and
+  offers output in multiple formats (table, JSON, YAML) suitable for both human
+  users and programmatic consumption.
+
+MAIN CATEGORIES:
+  • Profile Management    Configure and switch between Azure DevOps organizations
+  • Authentication        Secure PAT-based authentication with keyring storage
+  • Work Items            Create, read, update work items; add comments; change states
+  • Pull Requests         List, review, and manage PRs with threads and changes
+
+GETTING STARTED:
+  First time setup:
+    $ ado setup                          # Interactive configuration wizard
+
+  Or manual setup:
+    $ ado profile add --name myorg --org https://dev.azure.com/myorg --project myproject
+    $ ado auth login --profile myorg     # Enter your PAT when prompted
+
+  Basic usage:
+    $ ado work-item list --state Active
+    $ ado work-item get --id 123
+    $ ado pr list --repo myrepo
+
+GLOBAL FLAGS:
+  --profile, -p     Use a specific profile (default: active profile)
+  --format, -f      Output format: table, json, yaml (default: table)
+  --config          Config file path (default: $HOME/.azure-devops-cli.yaml)
+
+ENVIRONMENT VARIABLES:
+  AZURE_DEVOPS_ORG         Default organization URL
+  AZURE_DEVOPS_PROJECT     Default project name
+  AZURE_DEVOPS_PAT         Personal Access Token (use with caution)
+
+FOR LLMs AND AUTOMATION:
+  Get structured command information:
+    $ ado capabilities                   # JSON output of all commands
+  
+  Use JSON output for parsing:
+    $ ado work-item list --format json
+    $ ado pr list --repo myrepo --format json
+
+EXAMPLES:
+  # Work with work items
+  ado work-item list --state "Active" --type "Task"
+  ado work-item create --title "Fix bug" --type Bug --description "Details here"
+  ado work-item comment --id 123 --text "Updated the implementation"
+  ado work-item state --id 123 --state "Resolved"
+
+  # Work with pull requests
+  ado pr list --repo myrepo --status active
+  ado pr show --repo myrepo --pr-id 456
+  ado pr changes --repo myrepo --pr-id 456
+  ado pr threads --repo myrepo --pr-id 456
+
+  # Profile and authentication management
+  ado profile list
+  ado auth test --profile myorg
+  ado auth logout --profile myorg
+
+Learn more about a command:
+  ado <command> --help
+  ado work-item --help
+  ado pr --help`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
@@ -144,8 +211,41 @@ func GetCapabilities() Capabilities {
 
 var capabilitiesCmd = &cobra.Command{
 	Use:   "capabilities",
-	Short: "Show CLI capabilities in JSON format",
-	Long:  `Outputs a JSON representation of all available commands and options for LLM consumption.`,
+	Short: "Show CLI capabilities in JSON format for LLM integration",
+	Long: `Output a JSON representation of all available commands and options.
+
+This command is designed for LLMs and automation tools to programmatically 
+understand the CLI structure, available commands, and their usage patterns.
+
+The JSON output includes:
+- CLI version
+- All available commands with descriptions
+- Subcommands and examples
+- Global flags and options
+
+For Humans:
+  Use 'ado --help' or 'ado <command> --help' for readable help text.
+
+For LLMs/Automation:
+  Use this command to get structured information about all CLI capabilities.
+  This helps LLMs construct valid commands and understand the tool's functionality.
+
+Example output structure:
+  {
+    "version": "1.0.0",
+    "commands": {
+      "work-item": {
+        "use": "work-item",
+        "short": "Manage work items",
+        "subcommands": ["list", "get", "create"],
+        "examples": ["ado work-item list --state Active"]
+      }
+    },
+    "globalOptions": {
+      "profile": "Azure DevOps profile to use",
+      "format": ["table", "json", "yaml"]
+    }
+  }`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		capabilities := GetCapabilities()
 		output, err := json.MarshalIndent(capabilities, "", "  ")

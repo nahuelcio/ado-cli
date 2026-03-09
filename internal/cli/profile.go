@@ -11,8 +11,31 @@ import (
 
 var profileCmd = &cobra.Command{
 	Use:   "profile",
-	Short: "Manage Azure DevOps profiles",
-	Long:  `Commands to manage Azure DevOps profiles (add, list, delete, show, use).`,
+	Short: "Manage Azure DevOps profiles and configurations",
+	Long: `Manage profiles for different Azure DevOps organizations.
+
+Profiles store organization URLs, project names, and authentication settings.
+This allows you to work with multiple Azure DevOps instances seamlessly.
+
+Commands:
+  add     Create a new profile with org URL and project
+  list    Show all configured profiles
+  show    Display details for a specific profile
+  use     Set a profile as default (active)
+  delete  Remove a profile
+
+Examples:
+  # Add a new profile
+  ado profile add --name work --org https://dev.azure.com/mycompany --project myproject --default
+
+  # List all profiles
+  ado profile list
+
+  # Set active profile
+  ado profile use --name work
+
+  # Show profile details
+  ado profile show --name work`,
 }
 
 var profileAddCmd = &cobra.Command{

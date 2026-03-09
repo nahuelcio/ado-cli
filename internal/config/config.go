@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/your-org/azure-devops-cli/internal/auth"
+	"github.com/nahuelcio/ado-cli/internal/auth"
 )
 
 const (

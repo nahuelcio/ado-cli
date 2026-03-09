@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Repo = "your-org/azure-devops-cli"
+$Repo = "nahuelcio/ado-cli"
 $BinaryName = "ado.exe"
 
 # Colors for output

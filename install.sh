@@ -4,7 +4,7 @@ set -e
 # Azure DevOps CLI Installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/your-org/azure-devops-cli/main/install.sh | bash
 
-REPO="your-org/azure-devops-cli"
+REPO="nahuelcio/ado-cli"
 BINARY_NAME="ado"
 INSTALL_DIR="/usr/local/bin"
 VERSION="${VERSION:-latest}"

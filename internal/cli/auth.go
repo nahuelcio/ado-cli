@@ -12,8 +12,26 @@ import (
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
-	Short: "Manage authentication",
-	Long:  `Commands to manage Azure DevOps authentication (login, logout, test).`,
+	Short: "Manage authentication and credentials",
+	Long: `Manage authentication with Azure DevOps.
+
+This command group handles authentication using Personal Access Tokens (PAT).
+Tokens are securely stored in the system keyring (or fallback to encrypted files).
+
+Workflow:
+  1. Login:    ado auth login --profile myorg
+  2. Test:     ado auth test --profile myorg  
+  3. Logout:   ado auth logout --profile myorg
+
+Getting a PAT:
+  Visit: https://dev.azure.com/[org]/_usersSettings/tokens
+  Required scopes: Code (read), Work Items (read/write), Project (read)
+
+Examples:
+  ado auth login --profile myorg                    # Interactive login
+  ado auth login --profile myorg --pat <token>      # Non-interactive login
+  ado auth test --profile myorg                     # Verify connection
+  ado auth logout --profile myorg                   # Remove credentials`,
 }
 
 var authLoginCmd = &cobra.Command{

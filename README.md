@@ -1,5 +1,10 @@
 # Azure DevOps CLI (Go)
 
+[![CI](https://github.com/your-org/azure-devops-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/azure-devops-cli/actions/workflows/ci.yml)
+[![Release](https://github.com/your-org/azure-devops-cli/actions/workflows/release.yml/badge.svg)](https://github.com/your-org/azure-devops-cli/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/your-org/azure-devops-cli)](https://goreportcard.com/report/github.com/your-org/azure-devops-cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 CLI tool for Azure DevOps - Manage work items and pull requests from the command line.
 
 ## Features
