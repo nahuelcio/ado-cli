@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -51,13 +52,39 @@ type ProjectsResponse struct {
 }
 
 func NewConnectionConfig(organization, project, token string) ConnectionConfig {
+	organization = strings.TrimSpace(strings.TrimSuffix(organization, "/"))
 	baseURL := fmt.Sprintf("https://dev.azure.com/%s", organization)
 
-	org, proj, err := parseAzureDevOpsURL(organization)
-	if err == nil && proj != "" {
-		organization = org
-		project = proj
-		baseURL = fmt.Sprintf("https://dev.azure.com/%s", organization)
+	if parsedURL, err := url.Parse(organization); err == nil && parsedURL.Host != "" {
+		host := strings.ToLower(parsedURL.Hostname())
+		path := strings.Trim(parsedURL.Path, "/")
+
+		switch {
+		case host == "dev.azure.com":
+			parts := strings.Split(path, "/")
+			if len(parts) > 0 && parts[0] != "" {
+				organization = parts[0]
+				baseURL = fmt.Sprintf("https://dev.azure.com/%s", organization)
+			}
+			if len(parts) > 1 && parts[1] != "" && project == "" {
+				project = parts[1]
+			}
+		case strings.HasSuffix(host, ".visualstudio.com"):
+			organization = strings.TrimSuffix(host, ".visualstudio.com")
+			baseURL = "https://" + host
+			if path != "" && project == "" {
+				project = strings.Split(path, "/")[0]
+			}
+		}
+	} else {
+		org, proj, err := parseAzureDevOpsURL(organization)
+		if err == nil && org != "" {
+			organization = org
+			baseURL = fmt.Sprintf("https://dev.azure.com/%s", organization)
+			if proj != "" && project == "" {
+				project = proj
+			}
+		}
 	}
 
 	return ConnectionConfig{
