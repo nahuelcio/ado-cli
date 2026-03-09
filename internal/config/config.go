@@ -250,8 +250,9 @@ func (c *ConfigLoader) GetProject() string {
 
 func (c *ConfigLoader) GetAuth() *auth.AuthConfig {
 	authConfig := &auth.AuthConfig{Type: auth.AuthTypePAT}
+	profile := c.GetActiveProfile()
 
-	if profile := c.GetActiveProfile(); profile != nil {
+	if profile != nil {
 		authConfig = &profile.Auth
 	}
 
@@ -266,6 +267,17 @@ func (c *ConfigLoader) GetAuth() *auth.AuthConfig {
 	if value, ok := c.envOverrides["pat"]; ok {
 		authConfig.PAT = value
 		authConfig.Type = auth.AuthTypePAT
+		return authConfig
+	}
+
+	if authConfig.PAT == "" && profile != nil && profile.Organization != "" {
+		credManager, err := auth.NewCredentialManager("")
+		if err == nil {
+			pat, getErr := credManager.GetPAT(auth.ServicePAT, profile.Organization)
+			if getErr == nil && pat != "" {
+				authConfig.PAT = pat
+			}
+		}
 	}
 
 	return authConfig
