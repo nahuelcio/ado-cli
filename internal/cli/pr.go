@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/your-org/azure-devops-cli/internal/api"
-	"github.com/your-org/azure-devops-cli/internal/config"
+	"github.com/nahuelcio/ado-cli/internal/api"
+	"github.com/nahuelcio/ado-cli/internal/config"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"

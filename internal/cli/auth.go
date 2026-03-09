@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/your-org/azure-devops-cli/internal/auth"
-	"github.com/your-org/azure-devops-cli/internal/config"
+	"github.com/nahuelcio/ado-cli/internal/auth"
+	"github.com/nahuelcio/ado-cli/internal/config"
 )
 
 var authCmd = &cobra.Command{
