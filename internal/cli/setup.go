@@ -36,89 +36,115 @@ The setup will prompt you for:
 func runSetup(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Println("╔════════════════════════════════════════════════════════╗")
-	fmt.Println("║     Azure DevOps CLI - Interactive Setup               ║")
-	fmt.Println("╚════════════════════════════════════════════════════════╝")
+	printSetupBanner()
+
+	loader := config.NewConfigLoader("")
+	isFirstProfile := hasNoExistingProfiles(loader)
+
+	profileName, err := promptRequired(reader, "Profile name (e.g., 'myorg', 'work', 'personal'): ", "profile name")
+	if err != nil {
+		return err
+	}
+
+	orgURL, err := promptRequired(reader, "Organization URL (e.g., https://dev.azure.com/myorg): ", "organization URL")
+	if err != nil {
+		return err
+	}
+
+	projectName, err := promptRequired(reader, "Project name: ", "project name")
+	if err != nil {
+		return err
+	}
+
+	pat, err := promptPAT(reader)
+	if err != nil {
+		return err
+	}
+
+	orgURL = normalizeOrganizationURL(orgURL)
+	setAsDefault := promptDefaultProfile(reader, isFirstProfile)
+	profile := newSetupProfile(orgURL, projectName)
+
+	fmt.Println()
+	fmt.Println("Setting up profile...")
+
+	if err := saveSetupProfile(loader, profileName, profile, setAsDefault); err != nil {
+		return err
+	}
+	if err := persistSetupPAT(loader, profileName, &profile, orgURL, pat); err != nil {
+		return err
+	}
+
+	printSetupConnectionResult(orgURL, projectName, pat)
+	printSetupSuccess(profileName, setAsDefault)
+	return nil
+}
+
+func printSetupBanner() {
+	fmt.Println("========================================================")
+	fmt.Println(" Azure DevOps CLI - Interactive Setup")
+	fmt.Println("========================================================")
 	fmt.Println()
 	fmt.Println("This wizard will help you configure the CLI.")
 	fmt.Println("Press Ctrl+C at any time to cancel.")
 	fmt.Println()
+}
 
-	// Check if there are existing profiles
-	loader := config.NewConfigLoader("")
+func hasNoExistingProfiles(loader *config.ConfigLoader) bool {
 	cfg, err := loader.Load()
-	isFirstProfile := err != nil || len(cfg.Profiles) == 0
+	return err != nil || len(cfg.Profiles) == 0
+}
 
-	// 1. Profile Name
-	fmt.Print("Profile name (e.g., 'myorg', 'work', 'personal'): ")
-	profileName, err := reader.ReadString('\n')
+func promptRequired(reader *bufio.Reader, prompt, fieldName string) (string, error) {
+	fmt.Print(prompt)
+	value, err := reader.ReadString('\n')
 	if err != nil {
-		return fmt.Errorf("failed to read profile name: %w", err)
+		return "", fmt.Errorf("failed to read %s: %w", fieldName, err)
 	}
-	profileName = strings.TrimSpace(profileName)
-	if profileName == "" {
-		return fmt.Errorf("profile name is required")
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("%s is required", fieldName)
 	}
+	return value, nil
+}
 
-	// 2. Organization URL
-	fmt.Print("Organization URL (e.g., https://dev.azure.com/myorg): ")
-	orgURL, err := reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("failed to read organization URL: %w", err)
-	}
-	orgURL = strings.TrimSpace(orgURL)
-	if orgURL == "" {
-		return fmt.Errorf("organization URL is required")
-	}
-
-	// Normalize organization URL
-	if !strings.HasPrefix(orgURL, "http") {
-		orgURL = "https://dev.azure.com/" + orgURL
-	}
-
-	// 3. Project Name
-	fmt.Print("Project name: ")
-	projectName, err := reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("failed to read project name: %w", err)
-	}
-	projectName = strings.TrimSpace(projectName)
-	if projectName == "" {
-		return fmt.Errorf("project name is required")
-	}
-
-	// 4. Personal Access Token
+func promptPAT(reader *bufio.Reader) (string, error) {
 	fmt.Println()
 	fmt.Println("Personal Access Token (PAT) - Get yours at:")
 	fmt.Println("  https://dev.azure.com/[org]/_usersSettings/tokens")
 	fmt.Println("  Required scopes: Code (read), Work Items (read/write), Project (read)")
-	fmt.Print("Enter your PAT: ")
-	pat, err := reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("failed to read PAT: %w", err)
+	return promptRequired(reader, "Enter your PAT: ", "PAT")
+}
+
+func normalizeOrganizationURL(orgURL string) string {
+	if strings.HasPrefix(orgURL, "http") {
+		return orgURL
 	}
-	pat = strings.TrimSpace(pat)
-	if pat == "" {
-		return fmt.Errorf("PAT is required")
+	return "https://dev.azure.com/" + orgURL
+}
+
+func promptDefaultProfile(reader *bufio.Reader, isFirstProfile bool) bool {
+	if isFirstProfile {
+		return true
 	}
 
-	// 5. Set as default?
-	setAsDefault := isFirstProfile
-	if !isFirstProfile {
-		fmt.Println()
-		fmt.Print("Set as default profile? (Y/n): ")
-		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response == "" || response == "y" || response == "yes" {
-			setAsDefault = true
-		}
-	}
-
-	// Create profile
 	fmt.Println()
-	fmt.Println("Setting up profile...")
+	fmt.Print("Set as default profile? (Y/n): ")
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
 
-	profile := config.Profile{
+	switch strings.TrimSpace(strings.ToLower(response)) {
+	case "", "y", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func newSetupProfile(orgURL, projectName string) config.Profile {
+	return config.Profile{
 		Organization: orgURL,
 		Project:      projectName,
 		Auth: auth.AuthConfig{
@@ -126,49 +152,56 @@ func runSetup(cmd *cobra.Command, args []string) error {
 			Scopes: []string{"vso.packaging", "vso.code", "vso.project"},
 		},
 	}
+}
 
+func saveSetupProfile(loader *config.ConfigLoader, profileName string, profile config.Profile, setAsDefault bool) error {
 	loader.SetProfile(profileName, profile)
 	if setAsDefault {
 		loader.SetActiveProfile(profileName)
 	}
-
 	if err := loader.Save(); err != nil {
 		return fmt.Errorf("failed to save profile: %w", err)
 	}
+	return nil
+}
 
-	// Save PAT to keyring
+func persistSetupPAT(loader *config.ConfigLoader, profileName string, profile *config.Profile, orgURL, pat string) error {
 	credManager, err := auth.NewCredentialManager("")
 	if err != nil {
 		return fmt.Errorf("failed to create credential manager: %w", err)
 	}
 
-	orgName := extractOrgName(orgURL)
-	err = credManager.SavePAT(auth.ServicePAT, orgName, pat)
-	if err != nil {
-		// Try file-based fallback
-		fmt.Printf("Warning: Could not save to system keyring: %v\n", err)
-		fmt.Println("PAT will be stored in config file (less secure)")
-		profile.Auth.PAT = pat
-		loader.SetProfile(profileName, profile)
-		if err := loader.Save(); err != nil {
-			return fmt.Errorf("failed to save fallback profile: %w", err)
-		}
+	err = credManager.SavePAT(auth.ServicePAT, extractOrgName(orgURL), pat)
+	if err == nil {
+		return nil
 	}
 
-	// Test connection
+	fmt.Printf("Warning: Could not save to system keyring: %v\n", err)
+	fmt.Println("PAT will be stored in config file (less secure)")
+	profile.Auth.PAT = pat
+	loader.SetProfile(profileName, *profile)
+	if err := loader.Save(); err != nil {
+		return fmt.Errorf("failed to save fallback profile: %w", err)
+	}
+	return nil
+}
+
+func printSetupConnectionResult(orgURL, projectName, pat string) {
 	fmt.Println("Testing connection to Azure DevOps...")
 	if err := testConnection(orgURL, projectName, pat); err != nil {
 		fmt.Printf("Warning: Connection test failed: %v\n", err)
 		fmt.Println("The profile was created, but there might be an issue with your credentials.")
-	} else {
-		fmt.Println("✓ Connection successful!")
+		return
 	}
 
-	// Success message
+	fmt.Println("Connection successful!")
+}
+
+func printSetupSuccess(profileName string, setAsDefault bool) {
 	fmt.Println()
-	fmt.Println("╔════════════════════════════════════════════════════════╗")
-	fmt.Println("║              Setup Complete!                           ║")
-	fmt.Println("╚════════════════════════════════════════════════════════╝")
+	fmt.Println("========================================================")
+	fmt.Println(" Setup Complete!")
+	fmt.Println("========================================================")
 	fmt.Println()
 	fmt.Printf("Profile '%s' created successfully!\n", profileName)
 	if setAsDefault {
@@ -180,8 +213,6 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  ado pr list --profile %s --repo <repo-name>\n", profileName)
 	fmt.Println()
 	fmt.Println("For help: ado --help")
-
-	return nil
 }
 
 func extractOrgName(orgURL string) string {
@@ -196,7 +227,7 @@ func extractOrgName(orgURL string) string {
 func testConnection(orgURL, project, pat string) error {
 	// Simple HTTP test - we'll just try to get projects list
 	// This is a basic connectivity test
-	return nil // Placeholder - actual implementation would call API
+	return nil
 }
 
 func init() {
