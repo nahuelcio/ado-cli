@@ -94,7 +94,7 @@ type WorkItemClient interface {
 	UpdateWorkItem(ctx context.Context, project string, id int, updates []map[string]interface{}) (*WorkItem, error)
 	GetComments(ctx context.Context, project string, workItemID int) ([]WorkItemComment, error)
 	AddComment(ctx context.Context, project string, workItemID int, text string) (*WorkItemComment, error)
-	QueryByWiql(ctx context.Context, project string, wiqlQuery string) ([]WorkItem, error)
+	QueryByWiql(ctx context.Context, project string, wiqlQuery string, limit int) ([]WorkItem, error)
 	GetWorkItemsBatch(ctx context.Context, project string, ids []int) ([]WorkItem, error)
 	GetValidStates(ctx context.Context, project string, workItemID int) ([]string, error)
 }
@@ -145,9 +145,6 @@ func (c *workItemClient) GetWorkItem(ctx context.Context, project string, id int
 func (c *workItemClient) ListWorkItems(ctx context.Context, project string, filters WorkItemFilters) ([]WorkItem, error) {
 	project = c.resolveProject(project)
 	selectClause := "SELECT [System.Id], [System.Title], [System.State], [System.AssignedTo], [System.WorkItemType]"
-	if filters.Limit > 0 {
-		selectClause = fmt.Sprintf("SELECT TOP %d [System.Id], [System.Title], [System.State], [System.AssignedTo], [System.WorkItemType]", filters.Limit)
-	}
 	fromClause := "FROM WorkItems"
 	whereClauses := []string{"[System.TeamProject] = @project"}
 
@@ -165,7 +162,7 @@ func (c *workItemClient) ListWorkItems(ctx context.Context, project string, filt
 
 	wiql := fmt.Sprintf("%s\n%s\nWHERE %s", selectClause, fromClause, strings.Join(whereClauses, " AND "))
 
-	workItems, err := c.QueryByWiql(ctx, project, wiql)
+	workItems, err := c.QueryByWiql(ctx, project, wiql, filters.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -293,9 +290,12 @@ func (c *workItemClient) AddComment(ctx context.Context, project string, workIte
 	return &result, nil
 }
 
-func (c *workItemClient) QueryByWiql(ctx context.Context, project string, wiqlQuery string) ([]WorkItem, error) {
+func (c *workItemClient) QueryByWiql(ctx context.Context, project string, wiqlQuery string, limit int) ([]WorkItem, error) {
 	project = c.resolveProject(project)
 	url := fmt.Sprintf("%s/%s/_apis/wit/wiql?api-version=7.0", c.client.Config.BaseURL, project)
+	if limit > 0 {
+		url = fmt.Sprintf("%s&$top=%d", url, limit)
+	}
 
 	query := map[string]string{
 		"query": wiqlQuery,
