@@ -83,7 +83,7 @@ Learn more about a command:
   ado work-item --help
   ado pr --help`,
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Help()
+		_ = cmd.Help()
 	},
 }
 
@@ -101,8 +101,8 @@ func init() {
 	rootCmd.PersistentFlags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	rootCmd.PersistentFlags().StringP("format", "f", "table", "Output format (table/json/yaml)")
 
-	viper.BindPFlag("profile", rootCmd.PersistentFlags().Lookup("profile"))
-	viper.BindPFlag("format", rootCmd.PersistentFlags().Lookup("format"))
+	_ = viper.BindPFlag("profile", rootCmd.PersistentFlags().Lookup("profile"))
+	_ = viper.BindPFlag("format", rootCmd.PersistentFlags().Lookup("format"))
 
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(authCmd)
@@ -134,9 +134,9 @@ func initConfig() {
 }
 
 type Capabilities struct {
-	Version   string                 `json:"version"`
-	Commands  map[string]CommandInfo `json:"commands"`
-	GlobalOpts GlobalOpts            `json:"globalOptions"`
+	Version    string                 `json:"version"`
+	Commands   map[string]CommandInfo `json:"commands"`
+	GlobalOpts GlobalOpts             `json:"globalOptions"`
 }
 
 type CommandInfo struct {

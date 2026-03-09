@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -12,13 +11,12 @@ import (
 	"github.com/nahuelcio/ado-cli/internal/config"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
 var (
-	prFormat    OutputFormat
-	prProfile   string
-	prRepo      string
+	prFormat  OutputFormat
+	prProfile string
+	prRepo    string
 )
 
 func getPRClient(cmd *cobra.Command) (api.PullRequestClient, *config.ConfigLoader, error) {
@@ -37,7 +35,9 @@ func getPRClient(cmd *cobra.Command) (api.PullRequestClient, *config.ConfigLoade
 		cfg.SetActiveProfile(prProfile)
 	}
 
-	cfg.Load()
+	if _, err := cfg.Load(); err != nil {
+		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+	}
 
 	org := cfg.GetOrganization()
 	proj := cfg.GetProject()
@@ -420,7 +420,7 @@ var prReviewCmd = &cobra.Command{
 		thread := &api.PullRequestThread{
 			Comments: []api.ThreadComment{
 				{
-					Content:    comment,
+					Content:     comment,
 					CommentType: &commentType,
 				},
 			},

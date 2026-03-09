@@ -1,8 +1,8 @@
 # Azure DevOps CLI Installer for Windows
-# Usage: iwr -useb https://raw.githubusercontent.com/your-org/azure-devops-cli/main/install.ps1 | iex
+# Usage: iwr -useb https://raw.githubusercontent.com/nahuelcio/ado-cli/main/install.ps1 | iex
 
 param(
-    [string]$Version = "latest",
+    [string]$Version = "v0.1.0",
     [string]$InstallDir = "$env:LOCALAPPDATA\Programs\ado",
     [switch]$AddToPath = $true
 )

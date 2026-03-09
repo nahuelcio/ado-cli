@@ -23,9 +23,29 @@ const (
 	FormatYAML  OutputFormat = "yaml"
 )
 
+func (f *OutputFormat) String() string {
+	if f == nil {
+		return string(FormatTable)
+	}
+	return string(*f)
+}
+
+func (f *OutputFormat) Set(value string) error {
+	switch OutputFormat(value) {
+	case FormatTable, FormatJSON, FormatYAML:
+		*f = OutputFormat(value)
+		return nil
+	default:
+		return fmt.Errorf("invalid format %q: use table, json, or yaml", value)
+	}
+}
+
+func (f *OutputFormat) Type() string {
+	return "output-format"
+}
+
 var (
-	format    OutputFormat
-	profile   string
+	format      OutputFormat
 	profileName string
 )
 
@@ -40,7 +60,9 @@ func getWorkItemClient(cmd *cobra.Command) (api.WorkItemClient, *config.ConfigLo
 		cfg.SetActiveProfile(profileName)
 	}
 
-	cfg.Load()
+	if _, err := cfg.Load(); err != nil {
+		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+	}
 
 	org := cfg.GetOrganization()
 	proj := cfg.GetProject()

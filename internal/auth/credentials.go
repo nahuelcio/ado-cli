@@ -2,9 +2,11 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/99designs/keyring"
 )
@@ -42,9 +44,8 @@ func NewCredentialManager(storageDir string) (*CredentialManager, error) {
 
 	ring, err := keyring.Open(keyring.Config{
 		ServiceName:             "azure-devops-cli",
-		KeychainAccessibility:   keyring.WhenUnlockedThisDeviceOnly,
 		FileDir:                 storageDir,
-		FilePasswordFunc:        func(s string) (string, error) { return "", nil },
+		FilePasswordFunc:        func(_ string) (string, error) { return "", nil },
 		LibSecretCollectionName: "azure-devops-cli",
 	})
 
@@ -67,8 +68,8 @@ func (c *CredentialManager) SavePAT(service, account, pat string) error {
 	key := c.makeKey(service, account)
 	if c.backend == "keyring" {
 		err := c.ring.Set(keyring.Item{
-			Key:  key,
-			Data: []byte(pat),
+			Key:   key,
+			Data:  []byte(pat),
 			Label: fmt.Sprintf("Azure DevOps CLI - %s", account),
 		})
 		if err != nil {
@@ -84,7 +85,7 @@ func (c *CredentialManager) GetPAT(service, account string) (string, error) {
 	if c.backend == "keyring" {
 		item, err := c.ring.Get(key)
 		if err != nil {
-			if err == keyring.ErrItemNotFound {
+			if isKeyringNotFoundError(err) {
 				return "", nil
 			}
 			return "", fmt.Errorf("failed to get credential via keyring: %w", err)
@@ -98,7 +99,7 @@ func (c *CredentialManager) DeletePAT(service, account string) error {
 	key := c.makeKey(service, account)
 	if c.backend == "keyring" {
 		err := c.ring.Remove(key)
-		if err != nil && err != keyring.ErrItemNotFound {
+		if err != nil && !isKeyringNotFoundError(err) {
 			return fmt.Errorf("failed to delete credential via keyring: %w", err)
 		}
 		return nil
@@ -225,4 +226,18 @@ func (c *CredentialManager) IsPlatformManagerAvailable() bool {
 
 func (c *CredentialManager) GetStoragePath() string {
 	return c.storageFile
+}
+
+func isKeyringNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var keyNotFoundError interface{ Error() string }
+	if errors.As(err, &keyNotFoundError) {
+		msg := strings.ToLower(keyNotFoundError.Error())
+		return strings.Contains(msg, "not found")
+	}
+
+	return false
 }

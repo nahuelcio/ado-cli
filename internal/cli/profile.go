@@ -209,17 +209,17 @@ func init() {
 	profileAddCmd.Flags().String("org", "", "Azure DevOps organization URL")
 	profileAddCmd.Flags().String("project", "", "Azure DevOps project name")
 	profileAddCmd.Flags().Bool("default", false, "Set as default profile")
-	profileAddCmd.MarkFlagRequired("name")
-	profileAddCmd.MarkFlagRequired("org")
+	_ = profileAddCmd.MarkFlagRequired("name")
+	_ = profileAddCmd.MarkFlagRequired("org")
 
 	profileDeleteCmd.Flags().String("name", "", "Profile name to delete")
-	profileDeleteCmd.MarkFlagRequired("name")
+	_ = profileDeleteCmd.MarkFlagRequired("name")
 
 	profileShowCmd.Flags().String("name", "", "Profile name to show")
-	profileShowCmd.MarkFlagRequired("name")
+	_ = profileShowCmd.MarkFlagRequired("name")
 
 	profileUseCmd.Flags().String("name", "", "Profile name to use")
-	profileUseCmd.MarkFlagRequired("name")
+	_ = profileUseCmd.MarkFlagRequired("name")
 
 	profileCmd.AddCommand(profileAddCmd)
 	profileCmd.AddCommand(profileListCmd)

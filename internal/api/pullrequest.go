@@ -176,16 +176,16 @@ type SuggestedChange struct {
 }
 
 type ThreadComment struct {
-	ID              *int           `json:"id,omitempty"`
-	Content         string         `json:"content"`
-	CommentType     *CommentType   `json:"commentType,omitempty"`
-	Author          *IdentityRef   `json:"author,omitempty"`
-	CreatedDate     *string        `json:"createdDate,omitempty"`
-	ModifiedDate    *string        `json:"modifiedDate,omitempty"`
-	IsDeleted       *bool          `json:"isDeleted,omitempty"`
-	ParentCommentID *int           `json:"parentCommentId,omitempty"`
-	Reactions       []Reaction     `json:"reactions,omitempty"`
-	Likes           []IdentityRef  `json:"likes,omitempty"`
+	ID              *int          `json:"id,omitempty"`
+	Content         string        `json:"content"`
+	CommentType     *CommentType  `json:"commentType,omitempty"`
+	Author          *IdentityRef  `json:"author,omitempty"`
+	CreatedDate     *string       `json:"createdDate,omitempty"`
+	ModifiedDate    *string       `json:"modifiedDate,omitempty"`
+	IsDeleted       *bool         `json:"isDeleted,omitempty"`
+	ParentCommentID *int          `json:"parentCommentId,omitempty"`
+	Reactions       []Reaction    `json:"reactions,omitempty"`
+	Likes           []IdentityRef `json:"likes,omitempty"`
 }
 
 type Reaction struct {
@@ -216,14 +216,14 @@ type PullRequestThreadSummary struct {
 }
 
 type PullRequestComment struct {
-	ID              int         `json:"id"`
-	Content         string      `json:"content"`
-	CommentType     CommentType `json:"commentType"`
+	ID              int          `json:"id"`
+	Content         string       `json:"content"`
+	CommentType     CommentType  `json:"commentType"`
 	Author          *IdentityRef `json:"author,omitempty"`
-	CreatedDate     string      `json:"createdDate"`
-	ModifiedDate    *string     `json:"modifiedDate,omitempty"`
-	IsDeleted       *bool       `json:"isDeleted,omitempty"`
-	ParentCommentID *int        `json:"parentCommentId,omitempty"`
+	CreatedDate     string       `json:"createdDate"`
+	ModifiedDate    *string      `json:"modifiedDate,omitempty"`
+	IsDeleted       *bool        `json:"isDeleted,omitempty"`
+	ParentCommentID *int         `json:"parentCommentId,omitempty"`
 }
 
 type ChangeDetails struct {
@@ -239,18 +239,18 @@ type ChangeDetails struct {
 }
 
 type IterationChangeEntry struct {
-	ChangeID         int                `json:"changeId"`
-	ItemID           string             `json:"itemId"`
-	Path             string             `json:"path"`
-	OriginalPath     *string            `json:"originalPath,omitempty"`
-	ChangeType       ChangeType         `json:"changeType"`
-	SourceServerItem *string            `json:"sourceServerItem,omitempty"`
-	TargetServerItem *string            `json:"targetServerItem,omitempty"`
-	SourceVersion    *string            `json:"sourceVersion,omitempty"`
-	TargetVersion    *string            `json:"targetVersion,omitempty"`
-	SourceEncoding   *string            `json:"sourceEncoding,omitempty"`
-	TargetEncoding   *string            `json:"targetEncoding,omitempty"`
-	IsBinary         *bool              `json:"isBinary,omitempty"`
+	ChangeID         int        `json:"changeId"`
+	ItemID           string     `json:"itemId"`
+	Path             string     `json:"path"`
+	OriginalPath     *string    `json:"originalPath,omitempty"`
+	ChangeType       ChangeType `json:"changeType"`
+	SourceServerItem *string    `json:"sourceServerItem,omitempty"`
+	TargetServerItem *string    `json:"targetServerItem,omitempty"`
+	SourceVersion    *string    `json:"sourceVersion,omitempty"`
+	TargetVersion    *string    `json:"targetVersion,omitempty"`
+	SourceEncoding   *string    `json:"sourceEncoding,omitempty"`
+	TargetEncoding   *string    `json:"targetEncoding,omitempty"`
+	IsBinary         *bool      `json:"isBinary,omitempty"`
 	Content          *struct {
 		OriginalContent *string `json:"originalContent,omitempty"`
 		NewContent      *string `json:"newContent,omitempty"`
@@ -357,8 +357,8 @@ func (c *pullRequestClient) ListPullRequests(ctx context.Context, project, repo 
 	}
 
 	var result struct {
-		Count int            `json:"count"`
-		Value []PullRequest  `json:"value"`
+		Count int           `json:"count"`
+		Value []PullRequest `json:"value"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode pull requests response: %w", err)
@@ -399,7 +399,7 @@ func (c *pullRequestClient) GetPullRequestChanges(ctx context.Context, project, 
 		return []GitChange{}, nil
 	}
 
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations/%d/changes?api-version=7.0", 
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations/%d/changes?api-version=7.0",
 		c.client.Config.BaseURL, project, repo, prID, iterations[len(iterations)-1].ID)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
@@ -438,8 +438,8 @@ func (c *pullRequestClient) GetPullRequestIterations(ctx context.Context, projec
 	}
 
 	var result struct {
-		Count int                     `json:"count"`
-		Value []PullRequestIteration  `json:"value"`
+		Count int                    `json:"count"`
+		Value []PullRequestIteration `json:"value"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode iterations response: %w", err)
@@ -449,7 +449,7 @@ func (c *pullRequestClient) GetPullRequestIterations(ctx context.Context, projec
 }
 
 func (c *pullRequestClient) GetIterationChanges(ctx context.Context, project, repo string, prID, iterationID int) ([]GitChange, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations/%d/changes?api-version=7.0", 
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations/%d/changes?api-version=7.0",
 		c.client.Config.BaseURL, project, repo, prID, iterationID)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
@@ -488,8 +488,8 @@ func (c *pullRequestClient) GetThreads(ctx context.Context, project, repo string
 	}
 
 	var result struct {
-		Count int                   `json:"count"`
-		Value []PullRequestThread   `json:"value"`
+		Count int                 `json:"count"`
+		Value []PullRequestThread `json:"value"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode threads response: %w", err)
@@ -498,10 +498,10 @@ func (c *pullRequestClient) GetThreads(ctx context.Context, project, repo string
 	summaries := make([]PullRequestThreadSummary, len(result.Value))
 	for i, thread := range result.Value {
 		summaries[i] = PullRequestThreadSummary{
-			ID:           thread.ID,
-			Status:       *thread.Status,
+			ID:            thread.ID,
+			Status:        *thread.Status,
 			ThreadContext: thread.ThreadContext,
-			CommentCount: len(thread.Comments),
+			CommentCount:  len(thread.Comments),
 		}
 		if len(thread.Comments) > 0 {
 			summaries[i].FirstComment = &thread.Comments[0]
@@ -562,7 +562,7 @@ func (c *pullRequestClient) CreateThread(ctx context.Context, project, repo stri
 }
 
 func (c *pullRequestClient) PostComment(ctx context.Context, project, repo string, prID, threadID int, comment string) (*PullRequestComment, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/threads/%d/comments?api-version=7.0", 
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/threads/%d/comments?api-version=7.0",
 		c.client.Config.BaseURL, project, repo, prID, threadID)
 
 	commentData := map[string]interface{}{

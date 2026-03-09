@@ -2,12 +2,12 @@
 set -e
 
 # Azure DevOps CLI Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/your-org/azure-devops-cli/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/nahuelcio/ado-cli/main/install.sh | bash
 
 REPO="nahuelcio/ado-cli"
 BINARY_NAME="ado"
 INSTALL_DIR="/usr/local/bin"
-VERSION="${VERSION:-latest}"
+VERSION="${VERSION:-v0.1.0}"
 
 # Colors
 RED='\033[0;31m'

@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/nahuelcio/ado-cli/internal/auth"
 	"github.com/nahuelcio/ado-cli/internal/config"
+	"github.com/spf13/cobra"
 )
 
 var setupCmd = &cobra.Command{
@@ -150,7 +150,9 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		fmt.Println("PAT will be stored in config file (less secure)")
 		profile.Auth.PAT = pat
 		loader.SetProfile(profileName, profile)
-		loader.Save()
+		if err := loader.Save(); err != nil {
+			return fmt.Errorf("failed to save fallback profile: %w", err)
+		}
 	}
 
 	// Test connection

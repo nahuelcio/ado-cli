@@ -59,7 +59,9 @@ var authLoginCmd = &cobra.Command{
 		if pat == "" {
 			fmt.Print("Enter your PAT: ")
 			var input string
-			fmt.Scanln(&input)
+			if _, err := fmt.Scanln(&input); err != nil {
+				return fmt.Errorf("failed to read PAT: %w", err)
+			}
 			pat = input
 		}
 

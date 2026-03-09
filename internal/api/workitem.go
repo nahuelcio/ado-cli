@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,13 +12,13 @@ import (
 type WorkItemFields map[string]interface{}
 
 type WorkItemComment struct {
-	ID             int               `json:"id"`
-	Text           string            `json:"text"`
-	CreatedDate    string            `json:"createdDate"`
-	CreatedBy      *IdentityRef      `json:"createdBy"`
-	ModifiedDate   string            `json:"modifiedDate"`
-	ModifiedBy     *IdentityRef      `json:"modifiedBy"`
-	CommentVersion int               `json:"commentVersion"`
+	ID             int          `json:"id"`
+	Text           string       `json:"text"`
+	CreatedDate    string       `json:"createdDate"`
+	CreatedBy      *IdentityRef `json:"createdBy"`
+	ModifiedDate   string       `json:"modifiedDate"`
+	ModifiedBy     *IdentityRef `json:"modifiedBy"`
+	CommentVersion int          `json:"commentVersion"`
 }
 
 type WorkItem struct {
@@ -65,12 +64,12 @@ type WorkItemStateTransition struct {
 
 type WorkItemTypeInfo struct {
 	Name        string                    `json:"name"`
-	States      []string                   `json:"states"`
+	States      []string                  `json:"states"`
 	Transitions []WorkItemStateTransition `json:"transitions,omitempty"`
 }
 
 type WiqlQueryResult struct {
-	QueryResultType string          `json:"queryResultType"`
+	QueryResultType string            `json:"queryResultType"`
 	WorkItems       []WiqlWorkItemRef `json:"workItems"`
 	Columns         []WiqlColumnRef   `json:"columns"`
 }
@@ -135,7 +134,7 @@ func (c *workItemClient) GetWorkItem(ctx context.Context, project string, id int
 func (c *workItemClient) ListWorkItems(ctx context.Context, project string, filters WorkItemFilters) ([]WorkItem, error) {
 	selectClause := "SELECT [System.Id], [System.Title], [System.State], [System.AssignedTo], [System.WorkItemType]"
 	fromClause := "FROM WorkItems"
-	whereClauses := []string{fmt.Sprintf("[System.TeamProject] = @project")}
+	whereClauses := []string{"[System.TeamProject] = @project"}
 
 	if filters.State != "" {
 		whereClauses = append(whereClauses, fmt.Sprintf("[System.State] = '%s'", escapeWiqlString(filters.State)))

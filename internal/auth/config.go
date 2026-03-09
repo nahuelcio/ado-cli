@@ -3,20 +3,20 @@ package auth
 type AuthType string
 
 const (
-	AuthTypePAT            AuthType = "pat"
-	AuthTypeOAuth          AuthType = "oauth"
+	AuthTypePAT             AuthType = "pat"
+	AuthTypeOAuth           AuthType = "oauth"
 	AuthTypeManagedIdentity AuthType = "managed-identity"
-	AuthTypeSPN            AuthType = "spn"
+	AuthTypeSPN             AuthType = "spn"
 )
 
 type AuthConfig struct {
-	Type          AuthType `json:"type" yaml:"type"`
-	PAT           string   `json:"pat,omitempty" yaml:"pat,omitempty"`
-	ClientID      string   `json:"clientId,omitempty" yaml:"clientId,omitempty"`
-	ClientSecret  string   `json:"clientSecret,omitempty" yaml:"clientSecret,omitempty"`
-	TenantID      string   `json:"tenantId,omitempty" yaml:"tenantId,omitempty"`
-	ManagedID     string   `json:"managedId,omitempty" yaml:"managedId,omitempty"`
-	Scopes        []string `json:"scopes,omitempty" yaml:"scopes,omitempty"`
+	Type         AuthType `json:"type" yaml:"type"`
+	PAT          string   `json:"pat,omitempty" yaml:"pat,omitempty"`
+	ClientID     string   `json:"clientId,omitempty" yaml:"clientId,omitempty"`
+	ClientSecret string   `json:"clientSecret,omitempty" yaml:"clientSecret,omitempty"`
+	TenantID     string   `json:"tenantId,omitempty" yaml:"tenantId,omitempty"`
+	ManagedID    string   `json:"managedId,omitempty" yaml:"managedId,omitempty"`
+	Scopes       []string `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 }
 
 func (a *AuthConfig) Validate() error {
@@ -54,7 +54,7 @@ func (a *AuthConfig) GetScopes() []string {
 		"vso.release",
 	}
 
-	if a.Scopes != nil && len(a.Scopes) > 0 {
+	if len(a.Scopes) > 0 {
 		return a.Scopes
 	}
 
@@ -79,10 +79,10 @@ type Authenticator interface {
 }
 
 var (
-	ErrPATRequired              = &AuthError{message: "PAT is required for PAT authentication"}
-	ErrClientIDRequired         = &AuthError{message: "Client ID is required for OAuth authentication"}
+	ErrPATRequired               = &AuthError{message: "PAT is required for PAT authentication"}
+	ErrClientIDRequired          = &AuthError{message: "Client ID is required for OAuth authentication"}
 	ErrClientIDAndTenantRequired = &AuthError{message: "Client ID and Tenant ID are required for service principal authentication"}
-	ErrInvalidAuthType          = &AuthError{message: "Invalid authentication type"}
+	ErrInvalidAuthType           = &AuthError{message: "Invalid authentication type"}
 )
 
 type AuthError struct {

@@ -43,16 +43,22 @@ Fish:
 `,
 	DisableFlagsInUseLine: true,
 	ValidArgs:             []string{"bash", "zsh", "fish"},
-	Args:                  cobra.ExactValidArgs(1),
+	Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		shell := args[0]
 		switch shell {
 		case "bash":
-			rootCmd.GenBashCompletion(os.Stdout)
+			if err := rootCmd.GenBashCompletion(os.Stdout); err != nil {
+				return err
+			}
 		case "zsh":
-			rootCmd.GenZshCompletion(os.Stdout)
+			if err := rootCmd.GenZshCompletion(os.Stdout); err != nil {
+				return err
+			}
 		case "fish":
-			rootCmd.GenFishCompletion(os.Stdout, true)
+			if err := rootCmd.GenFishCompletion(os.Stdout, true); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unsupported shell: %s (supported: bash, zsh, fish)", shell)
 		}

@@ -1,8 +1,8 @@
 # Azure DevOps CLI (Go)
 
-[![CI](https://github.com/your-org/azure-devops-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/azure-devops-cli/actions/workflows/ci.yml)
-[![Release](https://github.com/your-org/azure-devops-cli/actions/workflows/release.yml/badge.svg)](https://github.com/your-org/azure-devops-cli/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/your-org/azure-devops-cli)](https://goreportcard.com/report/github.com/your-org/azure-devops-cli)
+[![CI](https://github.com/nahuelcio/ado-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/nahuelcio/ado-cli/actions/workflows/ci.yml)
+[![Release](https://github.com/nahuelcio/ado-cli/actions/workflows/release.yml/badge.svg)](https://github.com/nahuelcio/ado-cli/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/nahuelcio/ado-cli)](https://goreportcard.com/report/github.com/nahuelcio/ado-cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 CLI tool for Azure DevOps - Manage work items and pull requests from the command line.
@@ -22,23 +22,23 @@ CLI tool for Azure DevOps - Manage work items and pull requests from the command
 #### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-org/azure-devops-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/nahuelcio/ado-cli/main/install.sh | bash
 ```
 
 With specific version:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-org/azure-devops-cli/main/install.sh | bash -s -- --version v1.0.0
+curl -fsSL https://raw.githubusercontent.com/nahuelcio/ado-cli/main/install.sh | bash -s -- --version v1.0.0
 ```
 
 #### Windows (PowerShell)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/your-org/azure-devops-cli/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/nahuelcio/ado-cli/main/install.ps1 | iex
 ```
 
 With specific version:
 ```powershell
-iwr -useb https://raw.githubusercontent.com/your-org/azure-devops-cli/main/install.ps1 | iex -Version v1.0.0
+iwr -useb https://raw.githubusercontent.com/nahuelcio/ado-cli/main/install.ps1 | iex -Version v1.0.0
 ```
 
 ### Prerequisites
@@ -61,7 +61,7 @@ go install ./cmd/main.go
 
 ### Manual Installation
 
-Download the latest release for your platform from the [Releases page](https://github.com/your-org/azure-devops-cli/releases).
+Download the latest release for your platform from the [Releases page](https://github.com/nahuelcio/ado-cli/releases).
 
 **Supported platforms:**
 - Linux (amd64, arm64)

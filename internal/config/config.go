@@ -11,16 +11,16 @@ import (
 )
 
 const (
-	DefaultConfigVersion   = 1
-	DefaultProfileName     = "default"
-	DefaultConfigDirName   = ".azure-devops-cli"
-	DefaultConfigFileName  = "config.yaml"
+	DefaultConfigVersion  = 1
+	DefaultProfileName    = "default"
+	DefaultConfigDirName  = ".azure-devops-cli"
+	DefaultConfigFileName = "config.yaml"
 )
 
 var (
-	envOrg = []string{"AZURE_DEVOPS_ORG", "AZURE_DEVOPS_ORGANIZATION"}
-	envProject = []string{"AZURE_DEVOPS_PROJECT"}
-	envPAT = []string{"AZURE_DEVOPS_PAT"}
+	envOrg      = []string{"AZURE_DEVOPS_ORG", "AZURE_DEVOPS_ORGANIZATION"}
+	envProject  = []string{"AZURE_DEVOPS_PROJECT"}
+	envPAT      = []string{"AZURE_DEVOPS_PAT"}
 	envAuthType = []string{"AZURE_DEVOPS_AUTH_TYPE"}
 )
 
@@ -37,9 +37,9 @@ type Profile struct {
 }
 
 type ConfigLoader struct {
-	config        Config
-	configPath    string
-	envOverrides  map[string]string
+	config       Config
+	configPath   string
+	envOverrides map[string]string
 }
 
 func DefaultConfig() Config {
@@ -257,8 +257,8 @@ func (c *ConfigLoader) GetAuth() *auth.AuthConfig {
 
 	if value, ok := c.envOverrides["authType"]; ok {
 		authType := auth.AuthType(value)
-		if authType == auth.AuthTypePAT || authType == auth.AuthTypeOAuth || 
-		   authType == auth.AuthTypeManagedIdentity || authType == auth.AuthTypeSPN {
+		if authType == auth.AuthTypePAT || authType == auth.AuthTypeOAuth ||
+			authType == auth.AuthTypeManagedIdentity || authType == auth.AuthTypeSPN {
 			authConfig.Type = authType
 		}
 	}
