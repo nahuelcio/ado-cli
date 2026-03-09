@@ -99,6 +99,9 @@ ado auth login --profile myorg
 # 3. List work items
 ado work-item list --profile myorg --state Active
 
+# 3b. List work items assigned to the authenticated user
+ado work-item list --profile myorg --mine
+
 # 4. Get a specific work item
 ado work-item get --id 123 --profile myorg
 
@@ -137,7 +140,7 @@ ado auth test --profile <name>
 
 ```bash
 # List work items
-ado work-item list [--state <state>] [--type <type>] [--format table|json|yaml]
+ado work-item list [--state <state>] [--type <type>] [--assigned-to <user> | --mine] [--format table|json|yaml]
 
 # Get a work item
 ado work-item get --id <id> [--format table|json|yaml]

@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const maxWorkItemsBatchSize = 200
+
 type WorkItemFields map[string]interface{}
 
 type WorkItemComment struct {
@@ -50,6 +52,7 @@ type WorkItemCommentsResponse struct {
 type WorkItemFilters struct {
 	State    string
 	Assignee string
+	Mine     bool
 	Type     string
 	Limit    int
 }
@@ -142,13 +145,18 @@ func (c *workItemClient) GetWorkItem(ctx context.Context, project string, id int
 func (c *workItemClient) ListWorkItems(ctx context.Context, project string, filters WorkItemFilters) ([]WorkItem, error) {
 	project = c.resolveProject(project)
 	selectClause := "SELECT [System.Id], [System.Title], [System.State], [System.AssignedTo], [System.WorkItemType]"
+	if filters.Limit > 0 {
+		selectClause = fmt.Sprintf("SELECT TOP %d [System.Id], [System.Title], [System.State], [System.AssignedTo], [System.WorkItemType]", filters.Limit)
+	}
 	fromClause := "FROM WorkItems"
 	whereClauses := []string{"[System.TeamProject] = @project"}
 
 	if filters.State != "" {
 		whereClauses = append(whereClauses, fmt.Sprintf("[System.State] = '%s'", escapeWiqlString(filters.State)))
 	}
-	if filters.Assignee != "" {
+	if filters.Mine {
+		whereClauses = append(whereClauses, "[System.AssignedTo] = @Me")
+	} else if filters.Assignee != "" {
 		whereClauses = append(whereClauses, fmt.Sprintf("[System.AssignedTo] = '%s'", escapeWiqlString(filters.Assignee)))
 	}
 	if filters.Type != "" {
@@ -328,37 +336,43 @@ func (c *workItemClient) GetWorkItemsBatch(ctx context.Context, project string, 
 	}
 
 	url := fmt.Sprintf("%s/%s/_apis/wit/workitemsbatch?api-version=7.0", c.client.Config.BaseURL, project)
+	workItems := make([]WorkItem, 0, len(ids))
 
-	idStrings := make([]string, len(ids))
-	for i, id := range ids {
-		idStrings[i] = fmt.Sprintf("%d", id)
+	for start := 0; start < len(ids); start += maxWorkItemsBatchSize {
+		end := start + maxWorkItemsBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+
+		batchRequest := map[string]interface{}{
+			"ids":    ids[start:end],
+			"fields": []string{"System.Id", "System.Title", "System.State", "System.AssignedTo", "System.WorkItemType"},
+		}
+
+		resp, err := c.client.doRequest(ctx, http.MethodPost, url, batchRequest)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get work items batch: %w", err)
+		}
+
+		var result struct {
+			Count int        `json:"count"`
+			Value []WorkItem `json:"value"`
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to get work items batch: status %d, body: %s", resp.StatusCode, string(body))
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to decode work items batch response: %w", err)
+		}
+		resp.Body.Close()
+
+		workItems = append(workItems, result.Value...)
 	}
 
-	batchRequest := map[string]interface{}{
-		"ids":    ids,
-		"fields": []string{"System.Id", "System.Title", "System.State", "System.AssignedTo", "System.WorkItemType"},
-	}
-
-	resp, err := c.client.doRequest(ctx, http.MethodPost, url, batchRequest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get work items batch: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get work items batch: status %d, body: %s", resp.StatusCode, string(body))
-	}
-
-	var result struct {
-		Count int        `json:"count"`
-		Value []WorkItem `json:"value"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode work items batch response: %w", err)
-	}
-
-	return result.Value, nil
+	return workItems, nil
 }
 
 func (c *workItemClient) GetValidStates(ctx context.Context, project string, workItemID int) ([]string, error) {

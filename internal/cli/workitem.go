@@ -169,6 +169,9 @@ Examples:
   # List active tasks
   ado work-item list --state Active --type Task
 
+  # List work items assigned to the authenticated user
+  ado work-item list --mine
+
   # Get work item details in JSON format
   ado work-item get --id 123 --format json
 
@@ -195,11 +198,17 @@ var workItemListCmd = &cobra.Command{
 		state, _ := cmd.Flags().GetString("state")
 		workType, _ := cmd.Flags().GetString("type")
 		assignedTo, _ := cmd.Flags().GetString("assigned-to")
+		mine, _ := cmd.Flags().GetBool("mine")
+
+		if mine && assignedTo != "" {
+			return fmt.Errorf("--mine cannot be used together with --assigned-to")
+		}
 
 		filters := api.WorkItemFilters{
 			State:    state,
 			Type:     workType,
 			Assignee: assignedTo,
+			Mine:     mine,
 			Limit:    100,
 		}
 
@@ -420,6 +429,7 @@ func init() {
 	workItemListCmd.Flags().String("state", "", "Filter by state")
 	workItemListCmd.Flags().String("type", "", "Filter by work item type")
 	workItemListCmd.Flags().String("assigned-to", "", "Filter by assignee")
+	workItemListCmd.Flags().Bool("mine", false, "Filter by work items assigned to the authenticated user")
 	workItemListCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml)")
 
 	workItemGetCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
