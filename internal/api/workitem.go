@@ -100,6 +100,13 @@ type workItemClient struct {
 	client *AzureDevOpsClient
 }
 
+func (c *workItemClient) resolveProject(project string) string {
+	if strings.TrimSpace(project) != "" {
+		return project
+	}
+	return c.client.Config.Project
+}
+
 func NewWorkItemClient(client *AzureDevOpsClient) WorkItemClient {
 	return &workItemClient{
 		client: client,
@@ -107,6 +114,7 @@ func NewWorkItemClient(client *AzureDevOpsClient) WorkItemClient {
 }
 
 func (c *workItemClient) GetWorkItem(ctx context.Context, project string, id int, expand *bool) (*WorkItem, error) {
+	project = c.resolveProject(project)
 	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d?api-version=7.0", c.client.Config.BaseURL, project, id)
 	if expand != nil && *expand {
 		url += "&$expand=all"
@@ -132,6 +140,7 @@ func (c *workItemClient) GetWorkItem(ctx context.Context, project string, id int
 }
 
 func (c *workItemClient) ListWorkItems(ctx context.Context, project string, filters WorkItemFilters) ([]WorkItem, error) {
+	project = c.resolveProject(project)
 	selectClause := "SELECT [System.Id], [System.Title], [System.State], [System.AssignedTo], [System.WorkItemType]"
 	fromClause := "FROM WorkItems"
 	whereClauses := []string{"[System.TeamProject] = @project"}
@@ -161,6 +170,7 @@ func (c *workItemClient) ListWorkItems(ctx context.Context, project string, filt
 }
 
 func (c *workItemClient) CreateWorkItem(ctx context.Context, project string, workItemType string, fields map[string]interface{}) (*WorkItem, error) {
+	project = c.resolveProject(project)
 	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/$%s?api-version=7.0", c.client.Config.BaseURL, project, workItemType)
 
 	document := make([]JsonPatchOperation, 0, len(fields))
@@ -194,6 +204,7 @@ func (c *workItemClient) CreateWorkItem(ctx context.Context, project string, wor
 }
 
 func (c *workItemClient) UpdateWorkItem(ctx context.Context, project string, id int, updates []map[string]interface{}) (*WorkItem, error) {
+	project = c.resolveProject(project)
 	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d?api-version=7.0", c.client.Config.BaseURL, project, id)
 
 	document := make([]JsonPatchOperation, len(updates))
@@ -225,6 +236,7 @@ func (c *workItemClient) UpdateWorkItem(ctx context.Context, project string, id 
 }
 
 func (c *workItemClient) GetComments(ctx context.Context, project string, workItemID int) ([]WorkItemComment, error) {
+	project = c.resolveProject(project)
 	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d/comments?api-version=7.0-preview.4", c.client.Config.BaseURL, project, workItemID)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
@@ -247,6 +259,7 @@ func (c *workItemClient) GetComments(ctx context.Context, project string, workIt
 }
 
 func (c *workItemClient) AddComment(ctx context.Context, project string, workItemID int, text string) (*WorkItemComment, error) {
+	project = c.resolveProject(project)
 	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d/comments?api-version=7.0-preview.4", c.client.Config.BaseURL, project, workItemID)
 
 	comment := map[string]string{
@@ -273,6 +286,7 @@ func (c *workItemClient) AddComment(ctx context.Context, project string, workIte
 }
 
 func (c *workItemClient) QueryByWiql(ctx context.Context, project string, wiqlQuery string) ([]WorkItem, error) {
+	project = c.resolveProject(project)
 	url := fmt.Sprintf("%s/%s/_apis/wit/wiql?api-version=7.0", c.client.Config.BaseURL, project)
 
 	query := map[string]string{
@@ -308,6 +322,7 @@ func (c *workItemClient) QueryByWiql(ctx context.Context, project string, wiqlQu
 }
 
 func (c *workItemClient) GetWorkItemsBatch(ctx context.Context, project string, ids []int) ([]WorkItem, error) {
+	project = c.resolveProject(project)
 	if len(ids) == 0 {
 		return []WorkItem{}, nil
 	}
@@ -347,6 +362,7 @@ func (c *workItemClient) GetWorkItemsBatch(ctx context.Context, project string, 
 }
 
 func (c *workItemClient) GetValidStates(ctx context.Context, project string, workItemID int) ([]string, error) {
+	project = c.resolveProject(project)
 	workItem, err := c.GetWorkItem(ctx, project, workItemID, nil)
 	if err != nil {
 		return nil, err
