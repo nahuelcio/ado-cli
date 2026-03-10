@@ -104,6 +104,13 @@ func printOutput(data interface{}, format OutputFormat) error {
 		fmt.Println(string(output))
 	case FormatTable:
 		printTable(data)
+	default:
+		// Fallback to YAML for unknown formats
+		output, err := yaml.Marshal(data)
+		if err != nil {
+			return fmt.Errorf("failed to marshal YAML: %w", err)
+		}
+		fmt.Println(string(output))
 	}
 	return nil
 }
@@ -681,7 +688,7 @@ func init() {
 
 func init() {
 	if format == "" {
-		format = FormatTable
+		format = FormatYAML
 	}
 
 	_ = os.Stderr
