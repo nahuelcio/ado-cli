@@ -117,8 +117,12 @@ func extractLLMPRData(pr *api.PullRequest) map[string]interface{} {
 			case -10:
 				vote = "rejected"
 			}
+			name := ""
+			if r.VotedBy != nil {
+				name = r.VotedBy.DisplayName
+			}
 			reviewers = append(reviewers, map[string]string{
-				"name": r.DisplayName,
+				"name": name,
 				"vote": vote,
 			})
 		}
