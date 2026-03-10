@@ -49,7 +49,7 @@ var (
 	profileName string
 )
 
-func getWorkItemClient(cmd *cobra.Command) (api.WorkItemClient, *config.ConfigLoader, error) {
+func getWorkItemClient(cmd *cobra.Command) (api.WorkItemClient, string, *config.ConfigLoader, error) {
 	profileFlag, _ := cmd.Flags().GetString("profile")
 	if profileFlag != "" {
 		profileName = profileFlag
@@ -61,7 +61,7 @@ func getWorkItemClient(cmd *cobra.Command) (api.WorkItemClient, *config.ConfigLo
 	}
 
 	if _, err := cfg.Load(); err != nil {
-		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+		return nil, "", nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
 	org := cfg.GetOrganization()
@@ -69,23 +69,23 @@ func getWorkItemClient(cmd *cobra.Command) (api.WorkItemClient, *config.ConfigLo
 	auth := cfg.GetAuth()
 
 	if org == "" {
-		return nil, nil, fmt.Errorf("organization not configured. Use --profile or set AZURE_DEVOPS_ORG")
+		return nil, "", nil, fmt.Errorf("organization not configured. Use --profile or set AZURE_DEVOPS_ORG")
 	}
 	if proj == "" {
-		return nil, nil, fmt.Errorf("project not configured. Use --profile or set AZURE_DEVOPS_PROJECT")
+		return nil, "", nil, fmt.Errorf("project not configured. Use --profile or set AZURE_DEVOPS_PROJECT")
 	}
 
 	token := auth.PAT
 	if token == "" {
-		return nil, nil, fmt.Errorf("PAT not configured. Use --profile or set AZURE_DEVOPS_PAT")
+		return nil, "", nil, fmt.Errorf("PAT not configured. Use --profile or set AZURE_DEVOPS_PAT")
 	}
 
 	client, err := api.GetWorkItemClient(context.Background(), org, proj, token)
 	if err != nil {
-		return nil, nil, err
+		return nil, "", nil, err
 	}
 
-	return client, cfg, nil
+	return client, proj, cfg, nil
 }
 
 func printOutput(data interface{}, format OutputFormat) error {
@@ -130,12 +130,9 @@ func printTable(data interface{}) {
 		title := truncateString(getStringField(wi.Fields, "System.Title"), 38)
 		state := getStringField(wi.Fields, "System.State")
 		workItemType := getStringField(wi.Fields, "System.WorkItemType")
-		assignedTo := getStringField(wi.Fields, "System.AssignedTo")
-
-		if assignedTo != "" {
-			if id, ok := wi.Fields["System.AssignedTo"].(map[string]interface{}); ok {
-				assignedTo = truncateString(getStringField(id, "displayName"), 23)
-			}
+		assignedTo := ""
+		if assigneeData, ok := wi.Fields["System.AssignedTo"].(map[string]interface{}); ok {
+			assignedTo = truncateString(getStringField(assigneeData, "displayName"), 23)
 		}
 
 		fmt.Printf("%-10s %-40s %-15s %-15s %-25s\n", id, title, state, workItemType, assignedTo)
@@ -190,7 +187,7 @@ var workItemListCmd = &cobra.Command{
 	Short: "List work items",
 	Long:  `List work items with optional filters.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getWorkItemClient(cmd)
+		client, project, _, err := getWorkItemClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -212,7 +209,7 @@ var workItemListCmd = &cobra.Command{
 			Limit:    100,
 		}
 
-		workItems, err := client.ListWorkItems(context.Background(), "", filters)
+		workItems, err := client.ListWorkItems(context.Background(), project, filters)
 		if err != nil {
 			return fmt.Errorf("failed to list work items: %w", err)
 		}
@@ -226,7 +223,7 @@ var workItemGetCmd = &cobra.Command{
 	Short: "Get a work item",
 	Long:  `Get a specific work item by ID.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getWorkItemClient(cmd)
+		client, project, _, err := getWorkItemClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -239,17 +236,17 @@ var workItemGetCmd = &cobra.Command{
 		includeComments, _ := cmd.Flags().GetBool("include-comments")
 
 		expand := false
-		wi, err := client.GetWorkItem(context.Background(), "", id, &expand)
+		wi, err := client.GetWorkItem(context.Background(), project, id, &expand)
 		if err != nil {
 			return fmt.Errorf("failed to get work item: %w", err)
 		}
 
 		output := map[string]interface{}{
-			"workItem": wi,
+			"workItem": *wi,
 		}
 
 		if includeComments {
-			comments, err := client.GetComments(context.Background(), "", id)
+			comments, err := client.GetComments(context.Background(), project, id)
 			if err == nil {
 				output["comments"] = comments
 			}
@@ -264,7 +261,7 @@ var workItemCreateCmd = &cobra.Command{
 	Short: "Create a work item",
 	Long:  `Create a new work item.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getWorkItemClient(cmd)
+		client, project, _, err := getWorkItemClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -292,7 +289,7 @@ var workItemCreateCmd = &cobra.Command{
 			fields["System.AssignedTo"] = assignTo
 		}
 
-		wi, err := client.CreateWorkItem(context.Background(), "", workType, fields)
+		wi, err := client.CreateWorkItem(context.Background(), project, workType, fields)
 		if err != nil {
 			return fmt.Errorf("failed to create work item: %w", err)
 		}
@@ -306,7 +303,7 @@ var workItemCommentCmd = &cobra.Command{
 	Short: "Add a comment to a work item",
 	Long:  `Add a comment to an existing work item.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getWorkItemClient(cmd)
+		client, project, _, err := getWorkItemClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -321,7 +318,7 @@ var workItemCommentCmd = &cobra.Command{
 			return fmt.Errorf("comment text is required")
 		}
 
-		comment, err := client.AddComment(context.Background(), "", id, text)
+		comment, err := client.AddComment(context.Background(), project, id, text)
 		if err != nil {
 			return fmt.Errorf("failed to add comment: %w", err)
 		}
@@ -335,7 +332,7 @@ var workItemFieldCmd = &cobra.Command{
 	Short: "Update a work item field",
 	Long:  `Update a specific field on a work item.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getWorkItemClient(cmd)
+		client, project, _, err := getWorkItemClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -362,7 +359,7 @@ var workItemFieldCmd = &cobra.Command{
 			},
 		}
 
-		wi, err := client.UpdateWorkItem(context.Background(), "", id, updates)
+		wi, err := client.UpdateWorkItem(context.Background(), project, id, updates)
 		if err != nil {
 			return fmt.Errorf("failed to update work item: %w", err)
 		}
@@ -376,7 +373,7 @@ var workItemStateCmd = &cobra.Command{
 	Short: "Change work item state",
 	Long:  `Change the state of a work item.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getWorkItemClient(cmd)
+		client, project, _, err := getWorkItemClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -408,7 +405,7 @@ var workItemStateCmd = &cobra.Command{
 			})
 		}
 
-		wi, err := client.UpdateWorkItem(context.Background(), "", id, updates)
+		wi, err := client.UpdateWorkItem(context.Background(), project, id, updates)
 		if err != nil {
 			return fmt.Errorf("failed to update work item state: %w", err)
 		}

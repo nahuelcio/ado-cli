@@ -19,7 +19,7 @@ var (
 	prRepo    string
 )
 
-func getPRClient(cmd *cobra.Command) (api.PullRequestClient, *config.ConfigLoader, error) {
+func getPRClient(cmd *cobra.Command) (api.PullRequestClient, string, *config.ConfigLoader, error) {
 	profileFlag, _ := cmd.Flags().GetString("profile")
 	if profileFlag != "" {
 		prProfile = profileFlag
@@ -36,7 +36,7 @@ func getPRClient(cmd *cobra.Command) (api.PullRequestClient, *config.ConfigLoade
 	}
 
 	if _, err := cfg.Load(); err != nil {
-		return nil, nil, fmt.Errorf("failed to load config: %w", err)
+		return nil, "", nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
 	org := cfg.GetOrganization()
@@ -44,30 +44,30 @@ func getPRClient(cmd *cobra.Command) (api.PullRequestClient, *config.ConfigLoade
 	auth := cfg.GetAuth()
 
 	if org == "" {
-		return nil, nil, fmt.Errorf("organization not configured. Use --profile or set AZURE_DEVOPS_ORG")
+		return nil, "", nil, fmt.Errorf("organization not configured. Use --profile or set AZURE_DEVOPS_ORG")
 	}
 	if proj == "" {
-		return nil, nil, fmt.Errorf("project not configured. Use --profile or set AZURE_DEVOPS_PROJECT")
+		return nil, "", nil, fmt.Errorf("project not configured. Use --profile or set AZURE_DEVOPS_PROJECT")
 	}
 	if prRepo == "" {
 		activeProfile := cfg.GetActiveProfileName()
 		if activeProfile == "" {
 			activeProfile = "<profile>"
 		}
-		return nil, nil, fmt.Errorf("repository not configured. Use --repo <repo-name> or set AZURE_DEVOPS_REPO. Example: ado pr list --profile %s --repo my-repo", activeProfile)
+		return nil, "", nil, fmt.Errorf("repository not configured. Use --repo <repo-name> or set AZURE_DEVOPS_REPO. Example: ado pr list --profile %s --repo my-repo", activeProfile)
 	}
 
 	token := auth.PAT
 	if token == "" {
-		return nil, nil, fmt.Errorf("PAT not configured. Use --profile or set AZURE_DEVOPS_PAT")
+		return nil, "", nil, fmt.Errorf("PAT not configured. Use --profile or set AZURE_DEVOPS_PAT")
 	}
 
 	client, err := api.GetPullRequestClient(context.Background(), org, proj, token)
 	if err != nil {
-		return nil, nil, err
+		return nil, "", nil, err
 	}
 
-	return client, cfg, nil
+	return client, proj, cfg, nil
 }
 
 func printPRTable(data interface{}) {
@@ -243,7 +243,7 @@ var prListCmd = &cobra.Command{
 	Short: "List pull requests",
 	Long:  `List pull requests with optional filters.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getPRClient(cmd)
+		client, project, _, err := getPRClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -263,7 +263,7 @@ var prListCmd = &cobra.Command{
 			return fmt.Errorf("invalid status: %s", statusStr)
 		}
 
-		prs, err := client.ListPullRequests(context.Background(), "", prRepo, status)
+		prs, err := client.ListPullRequests(context.Background(), project, prRepo, status)
 		if err != nil {
 			return fmt.Errorf("failed to list pull requests: %w", err)
 		}
@@ -281,7 +281,7 @@ var prShowCmd = &cobra.Command{
 	Short: "Show a pull request",
 	Long:  `Show details of a specific pull request.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getPRClient(cmd)
+		client, project, _, err := getPRClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -291,7 +291,7 @@ var prShowCmd = &cobra.Command{
 			return fmt.Errorf("pull request ID is required (--pr-id)")
 		}
 
-		pr, err := client.GetPullRequest(context.Background(), "", prRepo, prID)
+		pr, err := client.GetPullRequest(context.Background(), project, prRepo, prID)
 		if err != nil {
 			return fmt.Errorf("failed to get pull request: %w", err)
 		}
@@ -308,7 +308,7 @@ var prChangesCmd = &cobra.Command{
 	Short: "Show pull request changes",
 	Long:  `Show changes in a specific pull request.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getPRClient(cmd)
+		client, project, _, err := getPRClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -318,7 +318,7 @@ var prChangesCmd = &cobra.Command{
 			return fmt.Errorf("pull request ID is required (--pr-id)")
 		}
 
-		changes, err := client.GetPullRequestChanges(context.Background(), "", prRepo, prID)
+		changes, err := client.GetPullRequestChanges(context.Background(), project, prRepo, prID)
 		if err != nil {
 			return fmt.Errorf("failed to get pull request changes: %w", err)
 		}
@@ -336,7 +336,7 @@ var prThreadsCmd = &cobra.Command{
 	Short: "Show pull request threads",
 	Long:  `Show comment threads of a specific pull request.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getPRClient(cmd)
+		client, project, _, err := getPRClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -346,7 +346,7 @@ var prThreadsCmd = &cobra.Command{
 			return fmt.Errorf("pull request ID is required (--pr-id)")
 		}
 
-		threads, err := client.GetThreads(context.Background(), "", prRepo, prID)
+		threads, err := client.GetThreads(context.Background(), project, prRepo, prID)
 		if err != nil {
 			return fmt.Errorf("failed to get pull request threads: %w", err)
 		}
@@ -364,7 +364,7 @@ var prSummaryCmd = &cobra.Command{
 	Short: "Show pull request summary",
 	Long:  `Show a summary of a specific pull request.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getPRClient(cmd)
+		client, project, _, err := getPRClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -374,7 +374,7 @@ var prSummaryCmd = &cobra.Command{
 			return fmt.Errorf("pull request ID is required (--pr-id)")
 		}
 
-		summary, err := client.GetPullRequestSummary(context.Background(), "", prRepo, prID)
+		summary, err := client.GetPullRequestSummary(context.Background(), project, prRepo, prID)
 		if err != nil {
 			return fmt.Errorf("failed to get pull request summary: %w", err)
 		}
@@ -389,7 +389,7 @@ var prReviewCmd = &cobra.Command{
 	Short: "Create a pull request review",
 	Long:  `Create a review or add a comment to a pull request.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, _, err := getPRClient(cmd)
+		client, project, _, err := getPRClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -431,7 +431,7 @@ var prReviewCmd = &cobra.Command{
 			Status: &threadStatus,
 		}
 
-		result, err := client.CreateThread(context.Background(), "", prRepo, prID, thread)
+		result, err := client.CreateThread(context.Background(), project, prRepo, prID, thread)
 		if err != nil {
 			return fmt.Errorf("failed to create review: %w", err)
 		}
