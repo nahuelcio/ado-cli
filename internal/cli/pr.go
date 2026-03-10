@@ -70,6 +70,65 @@ func getPRClient(cmd *cobra.Command) (api.PullRequestClient, string, *config.Con
 	return client, proj, cfg, nil
 }
 
+func extractLLMPRData(pr *api.PullRequest) map[string]interface{} {
+	result := map[string]interface{}{
+		"id":     pr.PullRequestID,
+		"title":  pr.Title,
+		"status": string(pr.Status),
+	}
+
+	if pr.Description != nil && *pr.Description != "" {
+		result["description"] = cleanHTML(*pr.Description)
+	}
+
+	if pr.SourceRefName != nil {
+		result["source_branch"] = *pr.SourceRefName
+	}
+	if pr.TargetRefName != nil {
+		result["target_branch"] = *pr.TargetRefName
+	}
+	if pr.CreatedBy != nil {
+		result["author"] = pr.CreatedBy.DisplayName
+	}
+	if pr.CreationDate != nil {
+		result["created_date"] = *pr.CreationDate
+	}
+	if pr.MergeStatus != nil {
+		result["merge_status"] = *pr.MergeStatus
+	}
+	if pr.IsDraft != nil && *pr.IsDraft {
+		result["is_draft"] = true
+	}
+	if pr.URL != nil {
+		result["url"] = *pr.URL
+	}
+
+	if len(pr.Reviewers) > 0 {
+		var reviewers []map[string]string
+		for _, r := range pr.Reviewers {
+			vote := "no_vote"
+			switch r.Vote {
+			case 10:
+				vote = "approved"
+			case 5:
+				vote = "approved_with_suggestions"
+			case -5:
+				vote = "waiting_for_author"
+			case -10:
+				vote = "rejected"
+			}
+			reviewers = append(reviewers, map[string]string{
+				"name": r.DisplayName,
+				"vote": vote,
+			})
+		}
+		result["reviewers"] = reviewers
+		result["reviewer_count"] = len(reviewers)
+	}
+
+	return result
+}
+
 func printPRTable(data interface{}) {
 	prs, ok := data.([]api.PullRequest)
 	if !ok {
@@ -268,11 +327,25 @@ var prListCmd = &cobra.Command{
 			return fmt.Errorf("failed to list pull requests: %w", err)
 		}
 
+		full, _ := cmd.Flags().GetBool("full")
 		if prFormat == FormatTable {
 			printPRTable(prs)
 			return nil
 		}
-		return printOutput(prs, prFormat)
+
+		if full {
+			return printOutput(prs, prFormat)
+		}
+
+		var llmData []map[string]interface{}
+		for _, pr := range prs {
+			llmData = append(llmData, extractLLMPRData(&pr))
+		}
+
+		if prFormat == "" {
+			prFormat = FormatYAML
+		}
+		return printOutput(llmData, prFormat)
 	},
 }
 
@@ -296,10 +369,19 @@ var prShowCmd = &cobra.Command{
 			return fmt.Errorf("failed to get pull request: %w", err)
 		}
 
-		if prFormat == FormatTable {
-			return printOutput(pr, FormatJSON)
+		full, _ := cmd.Flags().GetBool("full")
+		if full {
+			if prFormat == FormatTable {
+				return printOutput(pr, FormatJSON)
+			}
+			return printOutput(pr, prFormat)
 		}
-		return printOutput(pr, prFormat)
+
+		output := extractLLMPRData(pr)
+		if prFormat == "" {
+			prFormat = FormatYAML
+		}
+		return printOutput(output, prFormat)
 	},
 }
 
@@ -444,12 +526,14 @@ func init() {
 	prListCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	prListCmd.Flags().String("repo", "", "Repository name (required)")
 	prListCmd.Flags().String("status", "active", "Filter by status (active/completed/abandoned/all)")
-	prListCmd.Flags().VarP(&prFormat, "format", "f", "Output format (table/json/yaml)")
+	prListCmd.Flags().Bool("full", false, "Show all fields (default: LLM-optimized view)")
+	prListCmd.Flags().VarP(&prFormat, "format", "f", "Output format (table/json/yaml) - default: yaml")
 
 	prShowCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	prShowCmd.Flags().String("repo", "", "Repository name (required)")
 	prShowCmd.Flags().Int("pr-id", 0, "Pull request ID (required)")
-	prShowCmd.Flags().VarP(&prFormat, "format", "f", "Output format (table/json/yaml)")
+	prShowCmd.Flags().Bool("full", false, "Show all fields (default: LLM-optimized view)")
+	prShowCmd.Flags().VarP(&prFormat, "format", "f", "Output format (table/json/yaml) - default: yaml")
 
 	prChangesCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	prChangesCmd.Flags().String("repo", "", "Repository name (required)")
@@ -482,7 +566,7 @@ func init() {
 
 func init() {
 	if prFormat == "" {
-		prFormat = FormatTable
+		prFormat = FormatYAML
 	}
 
 	_ = os.Stderr
