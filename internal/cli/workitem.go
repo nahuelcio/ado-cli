@@ -148,6 +148,45 @@ func getStringField(fields map[string]interface{}, key string) string {
 	return ""
 }
 
+func cleanHTML(input string) string {
+	if input == "" {
+		return ""
+	}
+	
+	result := input
+	result = strings.ReplaceAll(result, "<br>", "\n")
+	result = strings.ReplaceAll(result, "<br/>", "\n")
+	result = strings.ReplaceAll(result, "<br />", "\n")
+	result = strings.ReplaceAll(result, "</div>", "\n")
+	result = strings.ReplaceAll(result, "</p>", "\n")
+	
+	inTag := false
+	var output strings.Builder
+	for _, r := range result {
+		if r == '<' {
+			inTag = true
+			continue
+		}
+		if r == '>' {
+			inTag = false
+			continue
+		}
+		if !inTag {
+			output.WriteRune(r)
+		}
+	}
+	
+	cleaned := output.String()
+	cleaned = strings.ReplaceAll(cleaned, "&nbsp;", " ")
+	cleaned = strings.ReplaceAll(cleaned, "&lt;", "<")
+	cleaned = strings.ReplaceAll(cleaned, "&gt;", ">")
+	cleaned = strings.ReplaceAll(cleaned, "&amp;", "&")
+	cleaned = strings.ReplaceAll(cleaned, "\n\n\n", "\n\n")
+	cleaned = strings.TrimSpace(cleaned)
+	
+	return cleaned
+}
+
 var workItemCmd = &cobra.Command{
 	Use:   "work-item",
 	Short: "Manage Azure DevOps work items (create, read, update, comment)",
@@ -196,6 +235,7 @@ var workItemListCmd = &cobra.Command{
 		workType, _ := cmd.Flags().GetString("type")
 		assignedTo, _ := cmd.Flags().GetString("assigned-to")
 		mine, _ := cmd.Flags().GetBool("mine")
+		full, _ := cmd.Flags().GetBool("full")
 
 		if mine && assignedTo != "" {
 			return fmt.Errorf("--mine cannot be used together with --assigned-to")
@@ -214,8 +254,123 @@ var workItemListCmd = &cobra.Command{
 			return fmt.Errorf("failed to list work items: %w", err)
 		}
 
-		return printOutput(workItems, format)
+		if full {
+			return printOutput(workItems, format)
+		}
+
+		var llmData []map[string]interface{}
+		for _, wi := range workItems {
+			llmData = append(llmData, extractLLMWorkItemData(&wi))
+		}
+
+		if format == "" {
+			format = FormatYAML
+		}
+
+		return printOutput(llmData, format)
 	},
+}
+
+func extractLLMWorkItemData(wi *api.WorkItem) map[string]interface{} {
+	fieldMapping := map[string]string{
+		"System.Title":        "title",
+		"System.Description":  "description",
+		"System.State":        "state",
+		"System.WorkItemType": "type",
+		"System.AssignedTo":   "assigned_to",
+		"System.CreatedBy":    "created_by",
+		"System.CreatedDate":  "created_date",
+		"System.ChangedDate":  "changed_date",
+		"System.Reason":       "reason",
+	}
+
+	result := map[string]interface{}{
+		"id":  wi.ID,
+		"url": wi.Links["html"].HRef,
+	}
+
+	for originalField, friendlyName := range fieldMapping {
+		if val, ok := wi.Fields[originalField]; ok {
+			switch v := val.(type) {
+			case map[string]interface{}:
+				if displayName, ok := v["displayName"].(string); ok {
+					result[friendlyName] = displayName
+				} else {
+					result[friendlyName] = val
+				}
+			case string:
+				if originalField == "System.Description" {
+					result[friendlyName] = cleanHTML(v)
+				} else {
+					result[friendlyName] = v
+				}
+			default:
+				result[friendlyName] = val
+			}
+		}
+	}
+
+	if commentCount, ok := wi.Fields["System.CommentCount"].(float64); ok && commentCount > 0 {
+		result["has_comments"] = true
+		result["comment_count"] = int(commentCount)
+	}
+
+	if len(wi.Relations) > 0 {
+		relationTypes := map[string]string{
+			"System.LinkTypes.Hierarchy-Forward":  "child",
+			"System.LinkTypes.Hierarchy-Reverse":  "parent",
+			"System.LinkTypes.Related":            "related",
+			"System.LinkTypes.Dependency-Forward": "successor",
+			"System.LinkTypes.Dependency-Reverse": "predecessor",
+		}
+
+		var relatedItems []map[string]interface{}
+		for _, rel := range wi.Relations {
+			relType := rel.Rel
+			if friendlyName, ok := relationTypes[rel.Rel]; ok {
+				relType = friendlyName
+			}
+
+			relID := ""
+			parts := strings.Split(rel.URL, "/")
+			if len(parts) > 0 {
+				relID = parts[len(parts)-1]
+			}
+
+			item := map[string]interface{}{
+				"type": relType,
+				"url":  rel.URL,
+			}
+			if relID != "" {
+				item["id"] = relID
+			}
+			relatedItems = append(relatedItems, item)
+		}
+		if len(relatedItems) > 0 {
+			result["related_count"] = len(relatedItems)
+			result["related"] = relatedItems
+		}
+	}
+
+	return result
+}
+
+func extractRelatedIDs(relations []api.WorkItemRelation) []int {
+	var ids []int
+	for _, rel := range relations {
+		if rel.Rel == "System.LinkTypes.Hierarchy-Forward" ||
+			rel.Rel == "System.LinkTypes.Hierarchy-Reverse" ||
+			rel.Rel == "System.LinkTypes.Related" {
+			parts := strings.Split(rel.URL, "/")
+			if len(parts) > 0 {
+				idStr := parts[len(parts)-1]
+				if id, err := strconv.Atoi(idStr); err == nil {
+					ids = append(ids, id)
+				}
+			}
+		}
+	}
+	return ids
 }
 
 var workItemGetCmd = &cobra.Command{
@@ -233,23 +388,72 @@ var workItemGetCmd = &cobra.Command{
 			return fmt.Errorf("work item ID is required")
 		}
 
-		includeComments, _ := cmd.Flags().GetBool("include-comments")
+		full, _ := cmd.Flags().GetBool("full")
 
-		expand := false
+		expand := true
 		wi, err := client.GetWorkItem(context.Background(), project, id, &expand)
 		if err != nil {
 			return fmt.Errorf("failed to get work item: %w", err)
 		}
 
-		output := map[string]interface{}{
-			"workItem": *wi,
+		var output map[string]interface{}
+		if full {
+			output = map[string]interface{}{
+				"workItem": *wi,
+			}
+		} else {
+			output = extractLLMWorkItemData(wi)
 		}
 
-		if includeComments {
+		if commentCount, ok := wi.Fields["System.CommentCount"].(float64); ok && commentCount > 0 {
 			comments, err := client.GetComments(context.Background(), project, id)
-			if err == nil {
-				output["comments"] = comments
+			if err == nil && len(comments) > 0 {
+				var simpleComments []map[string]interface{}
+				for _, c := range comments {
+					author := ""
+					if c.CreatedBy != nil {
+						author = c.CreatedBy.DisplayName
+					}
+					simpleComments = append(simpleComments, map[string]interface{}{
+						"author": author,
+						"date":   c.CreatedDate,
+						"text":   cleanHTML(c.Text),
+					})
+				}
+				output["comments"] = simpleComments
 			}
+		}
+
+		relatedFull, _ := cmd.Flags().GetBool("related-full")
+		if relatedFull && len(wi.Relations) > 0 {
+			relatedIDs := extractRelatedIDs(wi.Relations)
+			if len(relatedIDs) > 0 {
+				relatedWIs, err := client.GetWorkItemsBatch(context.Background(), project, relatedIDs)
+				if err == nil {
+					var qaFeedbacks []map[string]interface{}
+					for _, relatedWI := range relatedWIs {
+						wiType := getStringField(relatedWI.Fields, "System.WorkItemType")
+						if wiType == "QA Feedback" {
+							desc := getStringField(relatedWI.Fields, "System.Description")
+							qaFeedbacks = append(qaFeedbacks, map[string]interface{}{
+								"id":          relatedWI.ID,
+								"title":       getStringField(relatedWI.Fields, "System.Title"),
+								"state":       getStringField(relatedWI.Fields, "System.State"),
+								"description": cleanHTML(desc),
+								"url":         relatedWI.Links["html"].HRef,
+							})
+						}
+					}
+					if len(qaFeedbacks) > 0 {
+						output["qa_feedbacks_count"] = len(qaFeedbacks)
+						output["qa_feedbacks"] = qaFeedbacks
+					}
+				}
+			}
+		}
+
+		if format == "" {
+			format = FormatYAML
 		}
 
 		return printOutput(output, format)
@@ -427,12 +631,14 @@ func init() {
 	workItemListCmd.Flags().String("type", "", "Filter by work item type")
 	workItemListCmd.Flags().String("assigned-to", "", "Filter by assignee")
 	workItemListCmd.Flags().Bool("mine", false, "Filter by work items assigned to the authenticated user")
-	workItemListCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml)")
+	workItemListCmd.Flags().Bool("full", false, "Show all fields (default: LLM-optimized view)")
+	workItemListCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml) - default: yaml")
 
 	workItemGetCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
-	workItemGetCmd.Flags().Int("id", 0, "Work item ID")
-	workItemGetCmd.Flags().Bool("include-comments", false, "Include comments")
-	workItemGetCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml)")
+	workItemGetCmd.Flags().Int("id", 0, "Work item ID (required)")
+	workItemGetCmd.Flags().Bool("full", false, "Show all fields (default: LLM-optimized view)")
+	workItemGetCmd.Flags().Bool("related-full", false, "Fetch and show QA Feedbacks and related work items with full details")
+	workItemGetCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml) - default: yaml")
 
 	workItemCreateCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	workItemCreateCmd.Flags().String("title", "", "Work item title (required)")
