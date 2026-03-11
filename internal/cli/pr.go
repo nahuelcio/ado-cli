@@ -417,6 +417,51 @@ var prChangesCmd = &cobra.Command{
 	},
 }
 
+var prDiffCmd = &cobra.Command{
+	Use:   "diff",
+	Short: "Show pull request diff with file metadata",
+	Long: `Show the diff/changes of a pull request with file metadata for code review.
+
+This command retrieves the list of changed files with metadata useful for LLM code review:
+- File paths and change types (add/edit/delete/rename)
+- Original path (for renames)
+- Change statistics (additions/deletions)
+- Binary file detection
+
+Note: Azure DevOps API returns file metadata but not full diff content. 
+For viewing actual code changes, use the web interface or fetch individual files.
+
+Examples:
+  # Show diff for a PR (all files)
+  ado pr diff --repo myrepo --pr-id 123
+
+  # Show diff limited to first 5 files
+  ado pr diff --repo myrepo --pr-id 123 --max-files 5
+
+  # Show diff in JSON format
+  ado pr diff --repo myrepo --pr-id 123 --format json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, project, _, err := getPRClient(cmd)
+		if err != nil {
+			return err
+		}
+
+		prID, _ := cmd.Flags().GetInt("pr-id")
+		if prID == 0 {
+			return fmt.Errorf("pull request ID is required (--pr-id)")
+		}
+
+		maxFiles, _ := cmd.Flags().GetInt("max-files")
+
+		diff, err := client.GetPullRequestDiff(context.Background(), project, prRepo, prID, maxFiles)
+		if err != nil {
+			return fmt.Errorf("failed to get pull request diff: %w", err)
+		}
+
+		return printOutput(diff, prFormat)
+	},
+}
+
 var prThreadsCmd = &cobra.Command{
 	Use:   "threads",
 	Short: "Show pull request threads",
@@ -621,6 +666,12 @@ func init() {
 	prChangesCmd.Flags().Int("pr-id", 0, "Pull request ID (required)")
 	prChangesCmd.Flags().VarP(&prFormat, "format", "f", "Output format (table/json/yaml)")
 
+	prDiffCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
+	prDiffCmd.Flags().String("repo", "", "Repository name (required)")
+	prDiffCmd.Flags().Int("pr-id", 0, "Pull request ID (required)")
+	prDiffCmd.Flags().Int("max-files", 0, "Maximum number of files to show (0 = all)")
+	prDiffCmd.Flags().VarP(&prFormat, "format", "f", "Output format (yaml/json)")
+
 	prThreadsCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	prThreadsCmd.Flags().String("repo", "", "Repository name (required)")
 	prThreadsCmd.Flags().Int("pr-id", 0, "Pull request ID (required)")
@@ -643,6 +694,7 @@ func init() {
 	prCmd.AddCommand(prListCmd)
 	prCmd.AddCommand(prShowCmd)
 	prCmd.AddCommand(prChangesCmd)
+	prCmd.AddCommand(prDiffCmd)
 	prCmd.AddCommand(prThreadsCmd)
 	prCmd.AddCommand(prSummaryCmd)
 	prCmd.AddCommand(prReviewCmd)

@@ -307,6 +307,28 @@ type FileChangeSummary struct {
 	RemovedLines int    `json:"removedLines"`
 }
 
+type FileDiff struct {
+	Path         string `json:"path"`
+	ChangeType   string `json:"changeType"`
+	OriginalPath string `json:"originalPath,omitempty"`
+	Diff         string `json:"diff,omitempty"`
+	Additions    int    `json:"additions"`
+	Deletions    int    `json:"deletions"`
+	IsBinary     bool   `json:"isBinary"`
+	IsTooLarge   bool   `json:"isTooLarge,omitempty"`
+}
+
+type PullRequestDiff struct {
+	PullRequestID int        `json:"pullRequestId"`
+	Title         string     `json:"title"`
+	SourceBranch  string     `json:"sourceBranch"`
+	TargetBranch  string     `json:"targetBranch"`
+	Files         []FileDiff `json:"files"`
+	TotalAdditions int       `json:"totalAdditions"`
+	TotalDeletions int       `json:"totalDeletions"`
+	TotalFiles     int       `json:"totalFiles"`
+}
+
 type PRSummary struct {
 	PullRequestID int                 `json:"pullRequestId"`
 	Title         string              `json:"title"`
@@ -336,6 +358,7 @@ type PullRequestClient interface {
 	CreateThread(ctx context.Context, project, repo string, prID int, thread *PullRequestThread) (*PullRequestThread, error)
 	PostComment(ctx context.Context, project, repo string, prID, threadID int, comment string) (*PullRequestComment, error)
 	GetPullRequestSummary(ctx context.Context, project, repo string, prID int) (*PRSummary, error)
+	GetPullRequestDiff(ctx context.Context, project, repo string, prID int, maxFiles int) (*PullRequestDiff, error)
 }
 
 type pullRequestClient struct {
@@ -708,4 +731,62 @@ func (c *pullRequestClient) GetPullRequestSummary(ctx context.Context, project, 
 			FilesDeleted:      filesDeleted,
 		},
 	}, nil
+}
+
+func (c *pullRequestClient) GetPullRequestDiff(ctx context.Context, project, repo string, prID int, maxFiles int) (*PullRequestDiff, error) {
+	// Get PR details
+	pr, err := c.GetPullRequest(ctx, project, repo, prID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pull request: %w", err)
+	}
+
+	// Get changes
+	changes, err := c.GetPullRequestChanges(ctx, project, repo, prID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get changes: %w", err)
+	}
+
+	// Build diff result
+	diff := &PullRequestDiff{
+		PullRequestID:  prID,
+		Title:          pr.Title,
+		Files:          make([]FileDiff, 0),
+		TotalAdditions: 0,
+		TotalDeletions: 0,
+		TotalFiles:     len(changes),
+	}
+
+	if pr.SourceRefName != nil {
+		diff.SourceBranch = *pr.SourceRefName
+	}
+	if pr.TargetRefName != nil {
+		diff.TargetBranch = *pr.TargetRefName
+	}
+
+	// Process each file (limit to maxFiles)
+	fileCount := 0
+	for _, change := range changes {
+		if maxFiles > 0 && fileCount >= maxFiles {
+			break
+		}
+		fileCount++
+
+		fileDiff := FileDiff{
+			Path:         change.Path,
+			ChangeType:   string(change.ChangeType),
+			OriginalPath: "",
+			Additions:    0,
+			Deletions:    0,
+			IsBinary:     false,
+			IsTooLarge:   false,
+		}
+
+		if change.OriginalPath != nil {
+			fileDiff.OriginalPath = *change.OriginalPath
+		}
+
+		diff.Files = append(diff.Files, fileDiff)
+	}
+
+	return diff, nil
 }

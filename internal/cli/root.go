@@ -196,10 +196,11 @@ func GetCapabilities() Capabilities {
 			"pr": {
 				Use:         "pr",
 				Short:       "Manage Azure DevOps pull requests",
-				Subcommands: []string{"list", "show", "changes", "threads", "summary", "review"},
+				Subcommands: []string{"list", "show", "changes", "diff", "threads", "summary", "review"},
 				Examples: []string{
 					"ado pr list --repo myrepo",
 					"ado pr show --repo myrepo --pr-id 123",
+					"ado pr diff --repo myrepo --pr-id 123",
 					"ado pr review --repo myrepo --pr-id 123 --comment \"LGTM\"",
 				},
 			},

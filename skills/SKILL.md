@@ -100,6 +100,49 @@ ado pr list --repo myrepo --status completed # Completed
 ado pr show --repo myrepo --pr-id 123
 ```
 
+**Show PR diff (file changes metadata):**
+```bash
+# Show diff with file metadata (all files)
+ado pr diff --repo myrepo --pr-id 123
+
+# Limit to first 5 files
+ado pr diff --repo myrepo --pr-id 123 --max-files 5
+
+# Get in JSON format
+ado pr diff --repo myrepo --pr-id 123 --format json
+```
+
+**Output format for diff:**
+```yaml
+pullRequestId: 3251
+title: "Fix: mejorar manejo de errores"
+sourceBranch: refs/heads/feature/error-handling
+targetBranch: refs/heads/main
+totalFiles: 3
+totalAdditions: 45
+totalDeletions: 12
+files:
+  - path: "/src/auth/LoginService.cs"
+    changeType: edit
+    originalPath: ""
+    additions: 20
+    deletions: 5
+  - path: "/src/auth/TokenValidator.cs"
+    changeType: add
+    originalPath: ""
+    additions: 25
+    deletions: 0
+  - path: "/src/utils/OldHelper.cs"
+    changeType: delete
+    originalPath: ""
+    additions: 0
+    deletions: 12
+```
+
+**Note:** The diff command shows file metadata (what changed) but not the actual code content. 
+Azure DevOps API returns file lists and statistics, but full diff content requires fetching 
+individual files separately or using the web interface.
+
 **Output format:**
 ```yaml
 id: 123
