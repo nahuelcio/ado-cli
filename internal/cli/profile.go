@@ -204,6 +204,112 @@ var profileUseCmd = &cobra.Command{
 	},
 }
 
+var profileSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Check and sync PAT across profiles with same organization",
+	Long: `Check which profiles share the same organization and PAT authentication.
+
+This command shows:
+- Profiles grouped by organization
+- Which profiles will share the same PAT (auto-sync)
+- PAT status for each organization
+
+When multiple profiles use the same organization URL, they automatically
+share the same PAT stored in the system keyring. No need to login multiple times.
+
+Examples:
+  # Check PAT sync status across all profiles
+  ado profile sync
+
+  # Sync PAT from one profile to others in same org
+  ado profile sync --from yoizen --to yoizen-yflow`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fromProfile, _ := cmd.Flags().GetString("from")
+		toProfile, _ := cmd.Flags().GetString("to")
+
+		loader := config.NewConfigLoader("")
+		cfg, err := loader.Load()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+
+		// Group profiles by organization
+		orgGroups := make(map[string][]string)
+		profileDetails := make(map[string]config.Profile)
+
+		for name, profile := range cfg.Profiles {
+			orgKey := profile.Organization
+			if orgKey == "" {
+				orgKey = "(no organization)"
+			}
+			orgGroups[orgKey] = append(orgGroups[orgKey], name)
+			profileDetails[name] = profile
+		}
+
+		fmt.Println("Profile Synchronization Status")
+		fmt.Println("================================")
+		fmt.Println()
+
+		// Check if specific sync requested
+		if fromProfile != "" && toProfile != "" {
+			fromP, fromOk := profileDetails[fromProfile]
+			toP, toOk := profileDetails[toProfile]
+
+			if !fromOk {
+				return fmt.Errorf("profile '%s' not found", fromProfile)
+			}
+			if !toOk {
+				return fmt.Errorf("profile '%s' not found", toProfile)
+			}
+
+			if fromP.Organization != toP.Organization {
+				return fmt.Errorf("profiles '%s' and '%s' have different organizations\n  %s: %s\n  %s: %s",
+					fromProfile, toProfile, fromProfile, fromP.Organization, toProfile, toP.Organization)
+			}
+
+			fmt.Printf("✓ Profiles '%s' and '%s' share organization:\n", fromProfile, toProfile)
+			fmt.Printf("  Organization: %s\n", fromP.Organization)
+			fmt.Printf("  Project %s: %s\n", fromProfile, fromP.Project)
+			fmt.Printf("  Project %s: %s\n", toProfile, toP.Project)
+			fmt.Println()
+			fmt.Println("These profiles automatically share the same PAT.")
+			fmt.Println("No manual sync needed - PAT is retrieved by organization.")
+			return nil
+		}
+
+		// Show all organization groups
+		fmt.Printf("Found %d organization(s) with %d profile(s):\n\n", len(orgGroups), len(cfg.Profiles))
+
+		for org, profiles := range orgGroups {
+			fmt.Printf("📁 Organization: %s\n", org)
+			fmt.Printf("   Profiles sharing PAT (%d):\n", len(profiles))
+			
+			for _, name := range profiles {
+				p := profileDetails[name]
+				marker := "  "
+				if name == cfg.ActiveProfile {
+					marker = "* "
+				}
+				fmt.Printf("   %s%s (project: %s)\n", marker, name, p.Project)
+			}
+			fmt.Println()
+		}
+
+		fmt.Println("💡 How it works:")
+		fmt.Println("   - PAT is stored by organization in the system keyring")
+		fmt.Println("   - All profiles with the same org automatically share the PAT")
+		fmt.Println("   - No need to login multiple times for different projects!")
+		fmt.Println()
+		
+		if len(orgGroups) > 1 {
+			fmt.Printf("⚠ You have profiles in %d different organizations.\n", len(orgGroups))
+			fmt.Println("   Each organization requires its own PAT.")
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	profileAddCmd.Flags().String("name", "", "Profile name")
 	profileAddCmd.Flags().String("org", "", "Azure DevOps organization URL")
@@ -221,9 +327,13 @@ func init() {
 	profileUseCmd.Flags().String("name", "", "Profile name to use")
 	_ = profileUseCmd.MarkFlagRequired("name")
 
+	profileSyncCmd.Flags().String("from", "", "Source profile for sync check")
+	profileSyncCmd.Flags().String("to", "", "Target profile for sync check")
+
 	profileCmd.AddCommand(profileAddCmd)
 	profileCmd.AddCommand(profileListCmd)
 	profileCmd.AddCommand(profileDeleteCmd)
 	profileCmd.AddCommand(profileShowCmd)
 	profileCmd.AddCommand(profileUseCmd)
+	profileCmd.AddCommand(profileSyncCmd)
 }

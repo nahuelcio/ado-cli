@@ -103,6 +103,7 @@ func init() {
 	rootCmd.AddCommand(workItemCmd)
 	rootCmd.AddCommand(prCmd)
 	rootCmd.AddCommand(repoCmd)
+	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(capabilitiesCmd)
 	rootCmd.AddCommand(autocompleteCmd)
@@ -165,11 +166,12 @@ func GetCapabilities() Capabilities {
 			"profile": {
 				Use:         "profile",
 				Short:       "Manage Azure DevOps profiles",
-				Subcommands: []string{"add", "list", "delete", "show", "use"},
+				Subcommands: []string{"add", "list", "delete", "show", "use", "sync"},
 				Examples: []string{
 					"ado profile add --name myorg --org https://dev.azure.com/myorg --project myproject",
 					"ado profile list",
 					"ado profile use myorg",
+					"ado profile sync",
 				},
 			},
 			"auth": {
@@ -208,6 +210,15 @@ func GetCapabilities() Capabilities {
 				Examples: []string{
 					"ado repo list",
 					"ado repo list --format json",
+				},
+			},
+			"project": {
+				Use:         "project",
+				Short:       "Check project capabilities and resources",
+				Subcommands: []string{"check"},
+				Examples: []string{
+					"ado project check",
+					"ado project check --profile myprofile --verbose",
 				},
 			},
 		},
