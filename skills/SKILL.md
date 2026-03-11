@@ -181,7 +181,30 @@ reviewer_count: 2
 
 ## Configuration
 
-### Environment Variables
+### Quick Setup (Multi-Profile for Same Organization)
+
+For teams working with multiple projects in the same organization:
+
+```bash
+# 1. Add profiles for each project
+ado profile add --name yoizen-yflow --org https://yoizen.visualstudio.com --project yFlow
+ado profile add --name yoizen-ysocial --org https://yoizen.visualstudio.com --project ySocial
+
+# 2. Login once (PAT shared across profiles with same organization)
+ado auth login --profile yoizen-ysocial
+
+# 3. Set default profile
+ado profile use --name yoizen-ysocial
+
+# 4. Verify configuration
+ado profile sync
+ado project check --profile yoizen-ysocial --verbose
+ado project check --profile yoizen-yflow --verbose
+```
+
+**Note**: PATs are stored by organization in the system keyring. All profiles with the same organization URL automatically share the same PAT.
+
+### Environment Variables (Optional)
 ```bash
 export AZURE_DEVOPS_ORG="https://dev.azure.com/myorg"
 export AZURE_DEVOPS_PROJECT="myproject"
@@ -189,17 +212,56 @@ export AZURE_DEVOPS_PAT="your-personal-access-token"
 export AZURE_DEVOPS_REPO="default-repo"
 ```
 
+**Important**: Command-line `--profile` flag takes precedence over environment variables.
+
 ### Profile Management
 ```bash
 # Add a profile
-ado profile add --name production --org https://dev.azure.com/company --project main --pat $PAT
+ado profile add --name production --org https://dev.azure.com/company --project main
 
-# List profiles
+# List all profiles
 ado profile list
 
-# Use specific profile
-ado work-item list --profile production
+# Set active profile
+ado profile use --name production
+
+# Use specific profile for one command
+ado work-item list --profile yoizen-ysocial
+
+# Check profile synchronization
+ado profile sync
+
+# Show profile details
+ado profile show --name production
 ```
+
+### Multi-Profile Setup (Same Organization)
+
+For teams working with multiple projects in the same organization:
+
+```bash
+# Example: Two projects in same organization
+# 1. Add first profile
+ado profile add --name yoizen-ysocial --org https://yoizen.visualstudio.com --project ySocial
+
+# 2. Add second profile
+ado profile add --name yoizen-yflow --org https://yoizen.visualstudio.com --project yFlow
+
+# 3. Authenticate once (PAT is shared across same-org profiles)
+ado auth login --profile yoizen-ysocial
+
+# 4. Verify profiles share the same PAT
+ado profile sync
+
+# 5. Set default profile
+ado profile use --name yoizen-ysocial
+
+# 6. Test both profiles
+ado project check --profile yoizen-ysocial --verbose
+ado project check --profile yoizen-yflow --verbose
+```
+
+**Note**: When profiles share the same organization URL, they automatically share the same PAT. No need to login multiple times.
 
 ## Common Workflows
 

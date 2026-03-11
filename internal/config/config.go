@@ -227,9 +227,19 @@ func (c *ConfigLoader) Set(key string, value interface{}) {
 }
 
 func (c *ConfigLoader) GetOrganization() string {
+	// If a profile was explicitly set (not default), prioritize it over env vars
+	if c.config.ActiveProfile != "" && c.config.ActiveProfile != "default" {
+		profile := c.GetActiveProfile()
+		if profile != nil && profile.Organization != "" {
+			return profile.Organization
+		}
+	}
+
+	// Fall back to env vars only if no explicit profile
 	if value, ok := c.envOverrides["organization"]; ok {
 		return value
 	}
+
 	profile := c.GetActiveProfile()
 	if profile != nil {
 		return profile.Organization
@@ -238,9 +248,19 @@ func (c *ConfigLoader) GetOrganization() string {
 }
 
 func (c *ConfigLoader) GetProject() string {
+	// If a profile was explicitly set (not default), prioritize it over env vars
+	if c.config.ActiveProfile != "" && c.config.ActiveProfile != "default" {
+		profile := c.GetActiveProfile()
+		if profile != nil && profile.Project != "" {
+			return profile.Project
+		}
+	}
+
+	// Fall back to env vars only if no explicit profile
 	if value, ok := c.envOverrides["project"]; ok {
 		return value
 	}
+
 	profile := c.GetActiveProfile()
 	if profile != nil {
 		return profile.Project
@@ -334,7 +354,12 @@ func (c *ConfigLoader) mergeWithDefaults(loaded Config) Config {
 	if loaded.Version != 0 {
 		merged.Version = loaded.Version
 	}
-	if loaded.ActiveProfile != "" {
+
+	// Preserve explicitly set active profile (from --profile flag)
+	// If no explicit profile was set, use the one from config file
+	if c.config.ActiveProfile != "" && c.config.ActiveProfile != "default" {
+		merged.ActiveProfile = c.config.ActiveProfile
+	} else if loaded.ActiveProfile != "" {
 		merged.ActiveProfile = loaded.ActiveProfile
 	}
 

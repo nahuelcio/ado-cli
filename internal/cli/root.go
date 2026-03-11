@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -118,9 +119,11 @@ func initConfig() {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		viper.AddConfigPath(home)
+		// Use nested config directory for unified configuration
+		configDir := filepath.Join(home, ".azure-devops-cli")
+		viper.AddConfigPath(configDir)
 		viper.SetConfigType("yaml")
-		viper.SetConfigName(".azure-devops-cli")
+		viper.SetConfigName("config")
 	}
 
 	viper.AutomaticEnv()
