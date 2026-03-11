@@ -238,19 +238,25 @@ type ChangeDetails struct {
 	} `json:"content,omitempty"`
 }
 
+type ChangeItem struct {
+	ObjectID string `json:"objectId"`
+	Path     string `json:"path"`
+}
+
 type IterationChangeEntry struct {
-	ChangeID         int        `json:"changeId"`
-	ItemID           string     `json:"itemId"`
-	Path             string     `json:"path"`
-	OriginalPath     *string    `json:"originalPath,omitempty"`
-	ChangeType       ChangeType `json:"changeType"`
-	SourceServerItem *string    `json:"sourceServerItem,omitempty"`
-	TargetServerItem *string    `json:"targetServerItem,omitempty"`
-	SourceVersion    *string    `json:"sourceVersion,omitempty"`
-	TargetVersion    *string    `json:"targetVersion,omitempty"`
-	SourceEncoding   *string    `json:"sourceEncoding,omitempty"`
-	TargetEncoding   *string    `json:"targetEncoding,omitempty"`
-	IsBinary         *bool      `json:"isBinary,omitempty"`
+	ChangeID         int         `json:"changeId"`
+	Item             *ChangeItem `json:"item,omitempty"`
+	ItemID           string      `json:"itemId"`
+	Path             string      `json:"path"`
+	OriginalPath     *string     `json:"originalPath,omitempty"`
+	ChangeType       ChangeType  `json:"changeType"`
+	SourceServerItem *string     `json:"sourceServerItem,omitempty"`
+	TargetServerItem *string     `json:"targetServerItem,omitempty"`
+	SourceVersion    *string     `json:"sourceVersion,omitempty"`
+	TargetVersion    *string     `json:"targetVersion,omitempty"`
+	SourceEncoding   *string     `json:"sourceEncoding,omitempty"`
+	TargetEncoding   *string     `json:"targetEncoding,omitempty"`
+	IsBinary         *bool       `json:"isBinary,omitempty"`
 	Content          *struct {
 		OriginalContent *string `json:"originalContent,omitempty"`
 		NewContent      *string `json:"newContent,omitempty"`
@@ -423,9 +429,15 @@ func (c *pullRequestClient) GetPullRequestChanges(ctx context.Context, project, 
 	// Convert IterationChangeEntry to GitChange
 	changes := make([]GitChange, len(result.ChangeEntries))
 	for i, entry := range result.ChangeEntries {
+		// Get path from nested item object if available
+		path := entry.Path
+		if entry.Item != nil && entry.Item.Path != "" {
+			path = entry.Item.Path
+		}
+		
 		changes[i] = GitChange{
 			ChangeID:         entry.ChangeID,
-			Path:             entry.Path,
+			Path:             path,
 			OriginalPath:     entry.OriginalPath,
 			ChangeType:       entry.ChangeType,
 			SourceServerItem: entry.SourceServerItem,
@@ -493,9 +505,15 @@ func (c *pullRequestClient) GetIterationChanges(ctx context.Context, project, re
 	// Convert IterationChangeEntry to GitChange
 	changes := make([]GitChange, len(result.ChangeEntries))
 	for i, entry := range result.ChangeEntries {
+		// Get path from nested item object if available
+		path := entry.Path
+		if entry.Item != nil && entry.Item.Path != "" {
+			path = entry.Item.Path
+		}
+		
 		changes[i] = GitChange{
 			ChangeID:         entry.ChangeID,
-			Path:             entry.Path,
+			Path:             path,
 			OriginalPath:     entry.OriginalPath,
 			ChangeType:       entry.ChangeType,
 			SourceServerItem: entry.SourceServerItem,
