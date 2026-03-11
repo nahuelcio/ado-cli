@@ -414,13 +414,33 @@ func (c *pullRequestClient) GetPullRequestChanges(ctx context.Context, project, 
 	}
 
 	var result struct {
-		ChangeEntries []GitChange `json:"changeEntries"`
+		ChangeEntries []IterationChangeEntry `json:"changeEntries"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode changes response: %w", err)
 	}
 
-	return result.ChangeEntries, nil
+	// Convert IterationChangeEntry to GitChange
+	changes := make([]GitChange, len(result.ChangeEntries))
+	for i, entry := range result.ChangeEntries {
+		changes[i] = GitChange{
+			ChangeID:         entry.ChangeID,
+			Path:             entry.Path,
+			OriginalPath:     entry.OriginalPath,
+			ChangeType:       entry.ChangeType,
+			SourceServerItem: entry.SourceServerItem,
+			TargetServerItem: entry.TargetServerItem,
+			SourceVersion:    entry.SourceVersion,
+			TargetVersion:    entry.TargetVersion,
+			SourceEncoding:   entry.SourceEncoding,
+			TargetEncoding:   entry.TargetEncoding,
+			Links:            entry.Links,
+		}
+		// ItemID from IterationChangeEntry is a string (ObjectID), GitChange expects int
+		// We'll leave it as 0 since it's not a numeric ID
+	}
+
+	return changes, nil
 }
 
 func (c *pullRequestClient) GetPullRequestIterations(ctx context.Context, project, repo string, prID int) ([]PullRequestIteration, error) {
@@ -464,13 +484,31 @@ func (c *pullRequestClient) GetIterationChanges(ctx context.Context, project, re
 	}
 
 	var result struct {
-		ChangeEntries []GitChange `json:"changeEntries"`
+		ChangeEntries []IterationChangeEntry `json:"changeEntries"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode changes response: %w", err)
 	}
 
-	return result.ChangeEntries, nil
+	// Convert IterationChangeEntry to GitChange
+	changes := make([]GitChange, len(result.ChangeEntries))
+	for i, entry := range result.ChangeEntries {
+		changes[i] = GitChange{
+			ChangeID:         entry.ChangeID,
+			Path:             entry.Path,
+			OriginalPath:     entry.OriginalPath,
+			ChangeType:       entry.ChangeType,
+			SourceServerItem: entry.SourceServerItem,
+			TargetServerItem: entry.TargetServerItem,
+			SourceVersion:    entry.SourceVersion,
+			TargetVersion:    entry.TargetVersion,
+			SourceEncoding:   entry.SourceEncoding,
+			TargetEncoding:   entry.TargetEncoding,
+			Links:            entry.Links,
+		}
+	}
+
+	return changes, nil
 }
 
 func (c *pullRequestClient) GetThreads(ctx context.Context, project, repo string, prID int) ([]PullRequestThreadSummary, error) {
