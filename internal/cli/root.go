@@ -102,6 +102,7 @@ func init() {
 	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(workItemCmd)
 	rootCmd.AddCommand(prCmd)
+	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(capabilitiesCmd)
 	rootCmd.AddCommand(autocompleteCmd)
@@ -198,6 +199,15 @@ func GetCapabilities() Capabilities {
 					"ado pr list --repo myrepo",
 					"ado pr show --repo myrepo --pr-id 123",
 					"ado pr review --repo myrepo --pr-id 123 --comment \"LGTM\"",
+				},
+			},
+			"repo": {
+				Use:         "repo",
+				Short:       "Manage Azure DevOps Git repositories",
+				Subcommands: []string{"list"},
+				Examples: []string{
+					"ado repo list",
+					"ado repo list --format json",
 				},
 			},
 		},

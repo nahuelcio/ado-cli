@@ -116,6 +116,10 @@ func (c *AzureDevOpsClient) GetPullRequestClient() PullRequestClient {
 	return NewPullRequestClient(c)
 }
 
+func (c *AzureDevOpsClient) GetRepositoryClient() RepositoryClient {
+	return NewRepositoryClient(c)
+}
+
 func (c *AzureDevOpsClient) GetProjects(ctx context.Context) ([]Project, error) {
 	url := fmt.Sprintf("%s/_apis/projects?api-version=7.0", c.Config.BaseURL)
 
@@ -358,6 +362,15 @@ func GetPullRequestClient(ctx context.Context, organization, project, token stri
 		return nil, err
 	}
 	return client.GetPullRequestClient(), nil
+}
+
+func GetRepositoryClient(ctx context.Context, organization, project, token string) (RepositoryClient, error) {
+	factory := GetClientFactory()
+	client, err := factory.GetClient(organization, project, token)
+	if err != nil {
+		return nil, err
+	}
+	return client.GetRepositoryClient(), nil
 }
 
 func parseAzureDevOpsURL(input string) (organization, project string, err error) {

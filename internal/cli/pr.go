@@ -526,6 +526,83 @@ var prReviewCmd = &cobra.Command{
 	},
 }
 
+var repoCmd = &cobra.Command{
+	Use:   "repo",
+	Short: "Manage Azure DevOps Git repositories",
+	Long:  `List and view Git repositories in your Azure DevOps project.`,
+}
+
+var repoListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List Git repositories",
+	Long:  `List all Git repositories in the current project.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		profileFlag, _ := cmd.Flags().GetString("profile")
+
+		cfg := config.NewConfigLoader("")
+		if profileFlag != "" {
+			cfg.SetActiveProfile(profileFlag)
+		}
+
+		if _, err := cfg.Load(); err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+
+		org := cfg.GetOrganization()
+		proj := cfg.GetProject()
+		auth := cfg.GetAuth()
+
+		if org == "" {
+			return fmt.Errorf("organization not configured. Use --profile or set AZURE_DEVOPS_ORG")
+		}
+		if proj == "" {
+			return fmt.Errorf("project not configured. Use --profile or set AZURE_DEVOPS_PROJECT")
+		}
+
+		token := auth.PAT
+		if token == "" {
+			return fmt.Errorf("PAT not configured. Use --profile or set AZURE_DEVOPS_PAT")
+		}
+
+		client, err := api.GetRepositoryClient(context.Background(), org, proj, token)
+		if err != nil {
+			return err
+		}
+
+		repos, err := client.ListRepositories(context.Background(), proj)
+		if err != nil {
+			return fmt.Errorf("failed to list repositories: %w", err)
+		}
+
+		format, _ := cmd.Flags().GetString("format")
+		if format == "" {
+			format = "yaml"
+		}
+
+		// LLM-optimized output
+		var llmData []map[string]interface{}
+		for _, repo := range repos {
+			item := map[string]interface{}{
+				"name": repo.Name,
+				"id":   repo.ID,
+			}
+			if repo.DefaultBranch != "" {
+				item["default_branch"] = repo.DefaultBranch
+			}
+			if repo.RemoteURL != "" {
+				item["url"] = repo.RemoteURL
+			}
+			if repo.Size > 0 {
+				item["size_mb"] = repo.Size / 1024 / 1024
+			}
+			llmData = append(llmData, item)
+		}
+
+		outputFormat := OutputFormat(format)
+		return printOutput(llmData, outputFormat)
+	},
+}
+
 func init() {
 	prListCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	prListCmd.Flags().String("repo", "", "Repository name (required)")
@@ -560,12 +637,17 @@ func init() {
 	prReviewCmd.Flags().String("status", "", "Review status (approved/rejected/waiting)")
 	prReviewCmd.Flags().VarP(&prFormat, "format", "f", "Output format (table/json/yaml)")
 
+	repoListCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
+	repoListCmd.Flags().StringP("format", "f", "yaml", "Output format (yaml/json)")
+
 	prCmd.AddCommand(prListCmd)
 	prCmd.AddCommand(prShowCmd)
 	prCmd.AddCommand(prChangesCmd)
 	prCmd.AddCommand(prThreadsCmd)
 	prCmd.AddCommand(prSummaryCmd)
 	prCmd.AddCommand(prReviewCmd)
+
+	repoCmd.AddCommand(repoListCmd)
 }
 
 func init() {
