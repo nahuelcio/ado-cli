@@ -121,7 +121,7 @@ func (c *AzureDevOpsClient) GetRepositoryClient() RepositoryClient {
 }
 
 func (c *AzureDevOpsClient) GetProjects(ctx context.Context) ([]Project, error) {
-	url := fmt.Sprintf("%s/_apis/projects?api-version=7.0", c.Config.BaseURL)
+	url := fmt.Sprintf("%s/_apis/projects?api-version=7.1", c.Config.BaseURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -151,7 +151,7 @@ func (c *AzureDevOpsClient) GetProjects(ctx context.Context) ([]Project, error) 
 }
 
 func (c *AzureDevOpsClient) GetProject(ctx context.Context, projectName string) (*Project, error) {
-	url := fmt.Sprintf("%s/_apis/projects/%s?api-version=7.0", c.Config.BaseURL, projectName)
+	url := fmt.Sprintf("%s/_apis/projects/%s?api-version=7.1", c.Config.BaseURL, projectName)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

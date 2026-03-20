@@ -14,65 +14,24 @@ var cfgFile string
 
 var rootCmd = &cobra.Command{
 	Use:     "ado",
-	Short:   "Azure DevOps CLI - Manage work items and pull requests",
+	Short:   "Azure DevOps CLI",
 	Version: "dev",
-	Long: `Azure DevOps CLI (ado) - A command-line interface for Azure DevOps
+	Long: `Azure DevOps CLI - work items and pull requests.
 
-DESCRIPTION:
-  ado is a CLI tool for interacting with Azure DevOps services. It provides
-  comprehensive commands to manage work items, pull requests, and authentication.
-  The tool supports multiple profiles for different organizations/projects and
-  offers output in multiple formats (table, JSON, YAML) suitable for both human
-  users and programmatic consumption.
+Setup: ado setup
+Help: ado <command> --help
 
-MAIN CATEGORIES:
-  - Profile Management    Configure and switch between Azure DevOps organizations
-  - Authentication        Secure PAT-based authentication with keyring or file storage
-  - Work Items            Create, read, update work items; add comments; change states
-  - Pull Requests         List, review, and manage PRs with threads and changes
+Commands:
+  profile    Manage profiles
+  work-item  List, get, create, comment, state
+  pr         List, show, review, threads
+  auth       Login, test connection
 
-GETTING STARTED:
-  First time setup:
-    ado setup
-
-  Or manual setup:
-    ado profile add --name myorg --org https://dev.azure.com/myorg --project myproject
-    ado auth login --profile myorg
-
-  Basic usage:
-    ado work-item list --state Active
-    ado work-item get --id 123
-    ado pr list --repo myrepo
-
-GLOBAL FLAGS:
-  --profile, -p     Use a specific profile (default: active profile)
-  --format, -f      Output format: table, json, yaml (default: table)
-  --config          Config file path (default: $HOME/.azure-devops-cli.yaml)
-
-ENVIRONMENT VARIABLES:
-  AZURE_DEVOPS_ORG         Default organization URL
-  AZURE_DEVOPS_PROJECT     Default project name
-  AZURE_DEVOPS_PAT         Personal Access Token (use with caution)
-  AZURE_DEVOPS_REPO        Default repository name for PR commands
-
-FOR LLMs AND AUTOMATION:
-  Get structured command information:
-    ado capabilities
-
-  Use JSON output for parsing:
-    ado work-item list --format json
-    ado pr list --repo myrepo --format json
-
-EXAMPLES:
-  ado setup
-  ado auth test --profile myorg
-  ado work-item list --state Active --type Task
-  ado pr list --profile myorg --repo myrepo --status active
-
-Learn more about a command:
-  ado <command> --help
-  ado work-item --help
-  ado pr --help`,
+Examples:
+  ado work-item list --mine
+  ado work-item get --id 123
+  ado pr list --repo myrepo
+  ado pr review --repo myrepo --pr-id 123 --status approved`,
 	Run: func(cmd *cobra.Command, args []string) {
 		_ = cmd.Help()
 	},

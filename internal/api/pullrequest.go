@@ -26,6 +26,7 @@ const (
 	PullRequestStatusAbandoned PullRequestStatus = "abandoned"
 	PullRequestStatusCompleted PullRequestStatus = "completed"
 	PullRequestStatusNotSet    PullRequestStatus = "notSet"
+	PullRequestStatusAll       PullRequestStatus = "all"
 )
 
 type ThreadStatus string
@@ -125,7 +126,7 @@ type PullRequest struct {
 
 type GitChange struct {
 	ChangeID         int                `json:"changeId"`
-	ItemID           int                `json:"itemId"`
+	ItemID           string             `json:"itemId"`
 	Path             string             `json:"path"`
 	OriginalPath     *string            `json:"originalPath,omitempty"`
 	ChangeType       ChangeType         `json:"changeType"`
@@ -206,13 +207,11 @@ type PullRequestThread struct {
 }
 
 type PullRequestThreadSummary struct {
-	ID              int            `json:"id"`
-	Status          ThreadStatus   `json:"status"`
-	ThreadContext   *ThreadContext `json:"threadContext,omitempty"`
-	CommentCount    int            `json:"commentCount"`
-	FirstComment    *ThreadComment `json:"firstComment,omitempty"`
-	LastUpdatedDate *string        `json:"lastUpdatedDate,omitempty"`
-	Participants    []IdentityRef  `json:"participants,omitempty"`
+	ID           int    `json:"id"`
+	Status       string `json:"status"`
+	File         string `json:"file,omitempty"`
+	Comment      string `json:"comment"`
+	CommentCount int    `json:"commentCount"`
 }
 
 type PullRequestComment struct {
@@ -319,14 +318,14 @@ type FileDiff struct {
 }
 
 type PullRequestDiff struct {
-	PullRequestID int        `json:"pullRequestId"`
-	Title         string     `json:"title"`
-	SourceBranch  string     `json:"sourceBranch"`
-	TargetBranch  string     `json:"targetBranch"`
-	Files         []FileDiff `json:"files"`
-	TotalAdditions int       `json:"totalAdditions"`
-	TotalDeletions int       `json:"totalDeletions"`
-	TotalFiles     int       `json:"totalFiles"`
+	PullRequestID  int        `json:"pullRequestId"`
+	Title          string     `json:"title"`
+	SourceBranch   string     `json:"sourceBranch"`
+	TargetBranch   string     `json:"targetBranch"`
+	Files          []FileDiff `json:"files"`
+	TotalAdditions int        `json:"totalAdditions"`
+	TotalDeletions int        `json:"totalDeletions"`
+	TotalFiles     int        `json:"totalFiles"`
 }
 
 type PRSummary struct {
@@ -359,6 +358,7 @@ type PullRequestClient interface {
 	PostComment(ctx context.Context, project, repo string, prID, threadID int, comment string) (*PullRequestComment, error)
 	GetPullRequestSummary(ctx context.Context, project, repo string, prID int) (*PRSummary, error)
 	GetPullRequestDiff(ctx context.Context, project, repo string, prID int, maxFiles int) (*PullRequestDiff, error)
+	VoteReviewer(ctx context.Context, project, repo string, prID int, userID string, vote int) error
 }
 
 type pullRequestClient struct {
@@ -372,7 +372,7 @@ func NewPullRequestClient(client *AzureDevOpsClient) PullRequestClient {
 }
 
 func (c *pullRequestClient) ListPullRequests(ctx context.Context, project, repo string, status PullRequestStatus) ([]PullRequest, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.status=%s&api-version=7.0", c.client.Config.BaseURL, project, repo, status)
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.status=%s&api-version=7.1", c.client.Config.BaseURL, project, repo, status)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -397,7 +397,7 @@ func (c *pullRequestClient) ListPullRequests(ctx context.Context, project, repo 
 }
 
 func (c *pullRequestClient) GetPullRequest(ctx context.Context, project, repo string, prID int) (*PullRequest, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d?api-version=7.0", c.client.Config.BaseURL, project, repo, prID)
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d?api-version=7.1", c.client.Config.BaseURL, project, repo, prID)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -428,7 +428,7 @@ func (c *pullRequestClient) GetPullRequestChanges(ctx context.Context, project, 
 		return []GitChange{}, nil
 	}
 
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations/%d/changes?api-version=7.0",
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations/%d/changes?api-version=7.1",
 		c.client.Config.BaseURL, project, repo, prID, iterations[len(iterations)-1].ID)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
@@ -457,9 +457,10 @@ func (c *pullRequestClient) GetPullRequestChanges(ctx context.Context, project, 
 		if entry.Item != nil && entry.Item.Path != "" {
 			path = entry.Item.Path
 		}
-		
+
 		changes[i] = GitChange{
 			ChangeID:         entry.ChangeID,
+			ItemID:           entry.ItemID,
 			Path:             path,
 			OriginalPath:     entry.OriginalPath,
 			ChangeType:       entry.ChangeType,
@@ -471,15 +472,13 @@ func (c *pullRequestClient) GetPullRequestChanges(ctx context.Context, project, 
 			TargetEncoding:   entry.TargetEncoding,
 			Links:            entry.Links,
 		}
-		// ItemID from IterationChangeEntry is a string (ObjectID), GitChange expects int
-		// We'll leave it as 0 since it's not a numeric ID
 	}
 
 	return changes, nil
 }
 
 func (c *pullRequestClient) GetPullRequestIterations(ctx context.Context, project, repo string, prID int) ([]PullRequestIteration, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations?api-version=7.0", c.client.Config.BaseURL, project, repo, prID)
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations?api-version=7.1", c.client.Config.BaseURL, project, repo, prID)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -504,7 +503,7 @@ func (c *pullRequestClient) GetPullRequestIterations(ctx context.Context, projec
 }
 
 func (c *pullRequestClient) GetIterationChanges(ctx context.Context, project, repo string, prID, iterationID int) ([]GitChange, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations/%d/changes?api-version=7.0",
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/iterations/%d/changes?api-version=7.1",
 		c.client.Config.BaseURL, project, repo, prID, iterationID)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
@@ -533,9 +532,10 @@ func (c *pullRequestClient) GetIterationChanges(ctx context.Context, project, re
 		if entry.Item != nil && entry.Item.Path != "" {
 			path = entry.Item.Path
 		}
-		
+
 		changes[i] = GitChange{
 			ChangeID:         entry.ChangeID,
+			ItemID:           entry.ItemID,
 			Path:             path,
 			OriginalPath:     entry.OriginalPath,
 			ChangeType:       entry.ChangeType,
@@ -553,7 +553,7 @@ func (c *pullRequestClient) GetIterationChanges(ctx context.Context, project, re
 }
 
 func (c *pullRequestClient) GetThreads(ctx context.Context, project, repo string, prID int) ([]PullRequestThreadSummary, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/threads?api-version=7.0", c.client.Config.BaseURL, project, repo, prID)
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/threads?api-version=7.1", c.client.Config.BaseURL, project, repo, prID)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -576,14 +576,24 @@ func (c *pullRequestClient) GetThreads(ctx context.Context, project, repo string
 
 	summaries := make([]PullRequestThreadSummary, len(result.Value))
 	for i, thread := range result.Value {
-		summaries[i] = PullRequestThreadSummary{
-			ID:            thread.ID,
-			Status:        *thread.Status,
-			ThreadContext: thread.ThreadContext,
-			CommentCount:  len(thread.Comments),
+		status := ""
+		if thread.Status != nil {
+			status = string(*thread.Status)
 		}
+		filePath := ""
+		if thread.ThreadContext != nil && thread.ThreadContext.FilePath != nil {
+			filePath = *thread.ThreadContext.FilePath
+		}
+		comment := ""
 		if len(thread.Comments) > 0 {
-			summaries[i].FirstComment = &thread.Comments[0]
+			comment = thread.Comments[0].Content
+		}
+		summaries[i] = PullRequestThreadSummary{
+			ID:           thread.ID,
+			Status:       status,
+			File:         filePath,
+			Comment:      comment,
+			CommentCount: len(thread.Comments),
 		}
 	}
 
@@ -591,7 +601,7 @@ func (c *pullRequestClient) GetThreads(ctx context.Context, project, repo string
 }
 
 func (c *pullRequestClient) CreateThread(ctx context.Context, project, repo string, prID int, thread *PullRequestThread) (*PullRequestThread, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/threads?api-version=7.0", c.client.Config.BaseURL, project, repo, prID)
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/threads?api-version=7.1", c.client.Config.BaseURL, project, repo, prID)
 
 	if thread.ThreadContext != nil && thread.ThreadContext.FilePath != nil {
 		fp := *thread.ThreadContext.FilePath
@@ -641,7 +651,7 @@ func (c *pullRequestClient) CreateThread(ctx context.Context, project, repo stri
 }
 
 func (c *pullRequestClient) PostComment(ctx context.Context, project, repo string, prID, threadID int, comment string) (*PullRequestComment, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/threads/%d/comments?api-version=7.0",
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/threads/%d/comments?api-version=7.1",
 		c.client.Config.BaseURL, project, repo, prID, threadID)
 
 	commentData := map[string]interface{}{
@@ -789,4 +799,26 @@ func (c *pullRequestClient) GetPullRequestDiff(ctx context.Context, project, rep
 	}
 
 	return diff, nil
+}
+
+func (c *pullRequestClient) VoteReviewer(ctx context.Context, project, repo string, prID int, userID string, vote int) error {
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s/pullrequests/%d/reviewers/%s?api-version=7.1",
+		c.client.Config.BaseURL, project, repo, prID, userID)
+
+	voteData := map[string]int{
+		"vote": vote,
+	}
+
+	resp, err := c.client.doRequest(ctx, http.MethodPut, url, voteData)
+	if err != nil {
+		return fmt.Errorf("failed to vote on pull request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to vote on pull request: status %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
 }

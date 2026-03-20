@@ -44,48 +44,20 @@ func (f *OutputFormat) Type() string {
 	return "output-format"
 }
 
-var (
-	format      OutputFormat
-	profileName string
-)
+var format OutputFormat
 
 func getWorkItemClient(cmd *cobra.Command) (api.WorkItemClient, string, *config.ConfigLoader, error) {
-	profileFlag, _ := cmd.Flags().GetString("profile")
-	if profileFlag != "" {
-		profileName = profileFlag
-	}
-
-	cfg := config.NewConfigLoader("")
-	if profileName != "" {
-		cfg.SetActiveProfile(profileName)
-	}
-
-	if _, err := cfg.Load(); err != nil {
-		return nil, "", nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	org := cfg.GetOrganization()
-	proj := cfg.GetProject()
-	auth := cfg.GetAuth()
-
-	if org == "" {
-		return nil, "", nil, fmt.Errorf("organization not configured. Use --profile or set AZURE_DEVOPS_ORG")
-	}
-	if proj == "" {
-		return nil, "", nil, fmt.Errorf("project not configured. Use --profile or set AZURE_DEVOPS_PROJECT")
-	}
-
-	token := auth.PAT
-	if token == "" {
-		return nil, "", nil, fmt.Errorf("PAT not configured. Use --profile or set AZURE_DEVOPS_PAT")
-	}
-
-	client, err := api.GetWorkItemClient(context.Background(), org, proj, token)
+	cfg, authCfg, err := getConfigAndAuth(cmd)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	return client, proj, cfg, nil
+	client, err := api.GetWorkItemClient(context.Background(), authCfg.Org, authCfg.Project, authCfg.PAT)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return client, authCfg.Project, cfg, nil
 }
 
 func printOutput(data interface{}, format OutputFormat) error {
@@ -155,83 +127,22 @@ func getStringField(fields map[string]interface{}, key string) string {
 	return ""
 }
 
-func cleanHTML(input string) string {
-	if input == "" {
-		return ""
-	}
-	
-	result := input
-	result = strings.ReplaceAll(result, "<br>", "\n")
-	result = strings.ReplaceAll(result, "<br/>", "\n")
-	result = strings.ReplaceAll(result, "<br />", "\n")
-	result = strings.ReplaceAll(result, "</div>", "\n")
-	result = strings.ReplaceAll(result, "</p>", "\n")
-	
-	inTag := false
-	var output strings.Builder
-	for _, r := range result {
-		if r == '<' {
-			inTag = true
-			continue
-		}
-		if r == '>' {
-			inTag = false
-			continue
-		}
-		if !inTag {
-			output.WriteRune(r)
-		}
-	}
-	
-	cleaned := output.String()
-	cleaned = strings.ReplaceAll(cleaned, "&nbsp;", " ")
-	cleaned = strings.ReplaceAll(cleaned, "&lt;", "<")
-	cleaned = strings.ReplaceAll(cleaned, "&gt;", ">")
-	cleaned = strings.ReplaceAll(cleaned, "&amp;", "&")
-	cleaned = strings.ReplaceAll(cleaned, "\n\n\n", "\n\n")
-	cleaned = strings.TrimSpace(cleaned)
-	
-	return cleaned
-}
-
 var workItemCmd = &cobra.Command{
 	Use:   "work-item",
-	Short: "Manage Azure DevOps work items (create, read, update, comment)",
-	Long: `Manage work items in Azure DevOps.
-
-This command group provides full CRUD operations for work items including:
-- Listing work items with filters (state, type, assignee)
-- Getting detailed information about specific work items
-- Creating new work items (Tasks, Bugs, Features, etc.)
-- Adding comments and discussions
-- Updating fields and changing states
-
-Common work item types: Task, Bug, Feature, Epic, User Story
+	Short: "Manage work items",
+	Long: `Work items: list, get, create, comment, state.
 
 Examples:
-  # List active tasks
-  ado work-item list --state Active --type Task
-
-  # List work items assigned to the authenticated user
   ado work-item list --mine
-
-  # Get work item details in JSON format
-  ado work-item get --id 123 --format json
-
-  # Create a new bug
-  ado work-item create --title "Login button not working" --type Bug
-
-  # Add a comment
-  ado work-item comment --id 123 --text "Fixed in commit abc123"
-
-  # Change state to Resolved
+  ado work-item get --id 123
+  ado work-item create --title "Bug" --type Bug
   ado work-item state --id 123 --state Resolved`,
 }
 
 var workItemListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List work items",
-	Long:  `List work items with optional filters.`,
+	Long:  `List work items. Filters: --state, --type, --assigned-to, --mine.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, project, _, err := getWorkItemClient(cmd)
 		if err != nil {
@@ -279,42 +190,26 @@ var workItemListCmd = &cobra.Command{
 }
 
 func extractLLMWorkItemData(wi *api.WorkItem) map[string]interface{} {
-	fieldMapping := map[string]string{
-		"System.Title":        "title",
-		"System.Description":  "description",
-		"System.State":        "state",
-		"System.WorkItemType": "type",
-		"System.AssignedTo":   "assigned_to",
-		"System.CreatedBy":    "created_by",
-		"System.CreatedDate":  "created_date",
-		"System.ChangedDate":  "changed_date",
-		"System.Reason":       "reason",
-	}
-
 	result := map[string]interface{}{
-		"id":  wi.ID,
-		"url": wi.Links["html"].HRef,
+		"id": wi.ID,
 	}
 
-	for originalField, friendlyName := range fieldMapping {
-		if val, ok := wi.Fields[originalField]; ok {
-			switch v := val.(type) {
-			case map[string]interface{}:
-				if displayName, ok := v["displayName"].(string); ok {
-					result[friendlyName] = displayName
-				} else {
-					result[friendlyName] = val
-				}
-			case string:
-				if originalField == "System.Description" {
-					result[friendlyName] = cleanHTML(v)
-				} else {
-					result[friendlyName] = v
-				}
-			default:
-				result[friendlyName] = val
-			}
+	if title, ok := wi.Fields["System.Title"].(string); ok {
+		result["title"] = title
+	}
+	if state, ok := wi.Fields["System.State"].(string); ok {
+		result["state"] = state
+	}
+	if workItemType, ok := wi.Fields["System.WorkItemType"].(string); ok {
+		result["type"] = workItemType
+	}
+	if assignee, ok := wi.Fields["System.AssignedTo"].(map[string]interface{}); ok {
+		if displayName, ok := assignee["displayName"].(string); ok {
+			result["assigned_to"] = displayName
 		}
+	}
+	if desc, ok := wi.Fields["System.Description"].(string); ok {
+		result["description"] = cleanHTML(desc)
 	}
 
 	if commentCount, ok := wi.Fields["System.CommentCount"].(float64); ok && commentCount > 0 {
@@ -344,17 +239,12 @@ func extractLLMWorkItemData(wi *api.WorkItem) map[string]interface{} {
 				relID = parts[len(parts)-1]
 			}
 
-			item := map[string]interface{}{
+			relatedItems = append(relatedItems, map[string]interface{}{
 				"type": relType,
-				"url":  rel.URL,
-			}
-			if relID != "" {
-				item["id"] = relID
-			}
-			relatedItems = append(relatedItems, item)
+				"id":   relID,
+			})
 		}
 		if len(relatedItems) > 0 {
-			result["related_count"] = len(relatedItems)
 			result["related"] = relatedItems
 		}
 	}
@@ -564,7 +454,7 @@ var workItemFieldCmd = &cobra.Command{
 
 		updates := []map[string]interface{}{
 			{
-				"op":    "add",
+				"op":    "replace",
 				"path":  fmt.Sprintf("/fields/%s", field),
 				"value": value,
 			},
@@ -602,7 +492,7 @@ var workItemStateCmd = &cobra.Command{
 
 		updates := []map[string]interface{}{
 			{
-				"op":    "add",
+				"op":    "replace",
 				"path":  "/fields/System.State",
 				"value": state,
 			},
@@ -610,7 +500,7 @@ var workItemStateCmd = &cobra.Command{
 
 		if reason != "" {
 			updates = append(updates, map[string]interface{}{
-				"op":    "add",
+				"op":    "replace",
 				"path":  "/fields/System.Reason",
 				"value": reason,
 			})

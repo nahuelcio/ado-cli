@@ -36,7 +36,7 @@ func NewRepositoryClient(client *AzureDevOpsClient) RepositoryClient {
 }
 
 func (c *repositoryClient) ListRepositories(ctx context.Context, project string) ([]GitRepository, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories?api-version=7.0", c.client.Config.BaseURL, project)
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories?api-version=7.1", c.client.Config.BaseURL, project)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -61,7 +61,7 @@ func (c *repositoryClient) ListRepositories(ctx context.Context, project string)
 }
 
 func (c *repositoryClient) GetRepository(ctx context.Context, project, repoName string) (*GitRepository, error) {
-	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s?api-version=7.0", c.client.Config.BaseURL, project, repoName)
+	url := fmt.Sprintf("%s/%s/_apis/git/repositories/%s?api-version=7.1", c.client.Config.BaseURL, project, repoName)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {

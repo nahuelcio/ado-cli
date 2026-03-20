@@ -14,13 +14,16 @@ const maxWorkItemsBatchSize = 200
 type WorkItemFields map[string]interface{}
 
 type WorkItemComment struct {
-	ID             int          `json:"id"`
-	Text           string       `json:"text"`
-	CreatedDate    string       `json:"createdDate"`
-	CreatedBy      *IdentityRef `json:"createdBy"`
-	ModifiedDate   string       `json:"modifiedDate"`
-	ModifiedBy     *IdentityRef `json:"modifiedBy"`
-	CommentVersion int          `json:"commentVersion"`
+	WorkItemID   int          `json:"workItemId,omitempty"`
+	CommentId    int          `json:"commentId,omitempty"`
+	Text         string       `json:"text"`
+	CreatedDate  string       `json:"createdDate,omitempty"`
+	CreatedBy    *IdentityRef `json:"createdBy,omitempty"`
+	ModifiedDate string       `json:"modifiedDate,omitempty"`
+	ModifiedBy   *IdentityRef `json:"modifiedBy,omitempty"`
+	Version      int          `json:"version,omitempty"`
+	IsDeleted    bool         `json:"isDeleted,omitempty"`
+	URL          string       `json:"url,omitempty"`
 }
 
 type WorkItem struct {
@@ -43,10 +46,11 @@ type LinkRef struct {
 }
 
 type WorkItemCommentsResponse struct {
-	Count      int               `json:"count"`
-	Comments   []WorkItemComment `json:"comments"`
-	TotalCount int               `json:"totalCount"`
-	HasMore    bool              `json:"hasMore"`
+	Count             int               `json:"count"`
+	Comments          []WorkItemComment `json:"comments"`
+	TotalCount        int               `json:"totalCount"`
+	ContinuationToken string            `json:"continuationToken,omitempty"`
+	NextPage          string            `json:"nextPage,omitempty"`
 }
 
 type WorkItemFilters struct {
@@ -118,7 +122,7 @@ func NewWorkItemClient(client *AzureDevOpsClient) WorkItemClient {
 
 func (c *workItemClient) GetWorkItem(ctx context.Context, project string, id int, expand *bool) (*WorkItem, error) {
 	project = c.resolveProject(project)
-	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d?api-version=7.0", c.client.Config.BaseURL, project, id)
+	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d?api-version=7.1", c.client.Config.BaseURL, project, id)
 	if expand != nil && *expand {
 		url += "&$expand=all"
 	}
@@ -176,7 +180,7 @@ func (c *workItemClient) ListWorkItems(ctx context.Context, project string, filt
 
 func (c *workItemClient) CreateWorkItem(ctx context.Context, project string, workItemType string, fields map[string]interface{}) (*WorkItem, error) {
 	project = c.resolveProject(project)
-	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/$%s?api-version=7.0", c.client.Config.BaseURL, project, workItemType)
+	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/$%s?api-version=7.1", c.client.Config.BaseURL, project, workItemType)
 
 	document := make([]JsonPatchOperation, 0, len(fields))
 	for key, value := range fields {
@@ -210,7 +214,7 @@ func (c *workItemClient) CreateWorkItem(ctx context.Context, project string, wor
 
 func (c *workItemClient) UpdateWorkItem(ctx context.Context, project string, id int, updates []map[string]interface{}) (*WorkItem, error) {
 	project = c.resolveProject(project)
-	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d?api-version=7.0", c.client.Config.BaseURL, project, id)
+	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d?api-version=7.1", c.client.Config.BaseURL, project, id)
 
 	document := make([]JsonPatchOperation, len(updates))
 	for i, update := range updates {
@@ -242,30 +246,45 @@ func (c *workItemClient) UpdateWorkItem(ctx context.Context, project string, id 
 
 func (c *workItemClient) GetComments(ctx context.Context, project string, workItemID int) ([]WorkItemComment, error) {
 	project = c.resolveProject(project)
-	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d/comments?api-version=7.0-preview.4", c.client.Config.BaseURL, project, workItemID)
+	allComments := []WorkItemComment{}
+	continuationToken := ""
 
-	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get comments for work item %d: %w", workItemID, err)
+	for {
+		url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d/comments?api-version=7.1-preview.4", c.client.Config.BaseURL, project, workItemID)
+		if continuationToken != "" {
+			url = fmt.Sprintf("%s&continuationToken=%s", url, continuationToken)
+		}
+
+		resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get comments for work item %d: %w", workItemID, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("failed to get comments for work item %d: status %d, body: %s", workItemID, resp.StatusCode, string(body))
+		}
+
+		var result WorkItemCommentsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("failed to decode comments response: %w", err)
+		}
+
+		allComments = append(allComments, result.Comments...)
+
+		if result.ContinuationToken == "" {
+			break
+		}
+		continuationToken = result.ContinuationToken
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to get comments for work item %d: status %d, body: %s", workItemID, resp.StatusCode, string(body))
-	}
-
-	var result WorkItemCommentsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode comments response: %w", err)
-	}
-
-	return result.Comments, nil
+	return allComments, nil
 }
 
 func (c *workItemClient) AddComment(ctx context.Context, project string, workItemID int, text string) (*WorkItemComment, error) {
 	project = c.resolveProject(project)
-	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d/comments?api-version=7.0-preview.4", c.client.Config.BaseURL, project, workItemID)
+	url := fmt.Sprintf("%s/%s/_apis/wit/workitems/%d/comments?api-version=7.1-preview.4", c.client.Config.BaseURL, project, workItemID)
 
 	comment := map[string]string{
 		"text": text,
@@ -292,7 +311,7 @@ func (c *workItemClient) AddComment(ctx context.Context, project string, workIte
 
 func (c *workItemClient) QueryByWiql(ctx context.Context, project string, wiqlQuery string, limit int) ([]WorkItem, error) {
 	project = c.resolveProject(project)
-	url := fmt.Sprintf("%s/%s/_apis/wit/wiql?api-version=7.0", c.client.Config.BaseURL, project)
+	url := fmt.Sprintf("%s/%s/_apis/wit/wiql?api-version=7.1", c.client.Config.BaseURL, project)
 	if limit > 0 {
 		url = fmt.Sprintf("%s&$top=%d", url, limit)
 	}
@@ -335,7 +354,7 @@ func (c *workItemClient) GetWorkItemsBatch(ctx context.Context, project string, 
 		return []WorkItem{}, nil
 	}
 
-	url := fmt.Sprintf("%s/%s/_apis/wit/workitemsbatch?api-version=7.0", c.client.Config.BaseURL, project)
+	url := fmt.Sprintf("%s/%s/_apis/wit/workitemsbatch?api-version=7.1", c.client.Config.BaseURL, project)
 	workItems := make([]WorkItem, 0, len(ids))
 
 	for start := 0; start < len(ids); start += maxWorkItemsBatchSize {
@@ -387,7 +406,7 @@ func (c *workItemClient) GetValidStates(ctx context.Context, project string, wor
 		return nil, fmt.Errorf("work item type not found for work item %d", workItemID)
 	}
 
-	url := fmt.Sprintf("%s/%s/_apis/wit/workitemtypes/%s?api-version=7.0", c.client.Config.BaseURL, project, workItemType)
+	url := fmt.Sprintf("%s/%s/_apis/wit/workitemtypes/%s?$expand=all&api-version=7.1", c.client.Config.BaseURL, project, workItemType)
 
 	resp, err := c.client.doRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {
