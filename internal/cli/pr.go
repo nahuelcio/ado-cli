@@ -20,12 +20,14 @@ func getPRClient(cmd *cobra.Command) (api.PullRequestClient, string, string, err
 		return nil, "", "", err
 	}
 
+	if err := checkProfileScope(cfg, ScopePRs); err != nil {
+		return nil, "", "", err
+	}
+
 	repo, err := getRepoFromFlags(cmd)
 	if err != nil {
 		return nil, "", "", err
 	}
-
-	_ = cfg
 
 	client, err := api.GetPullRequestClient(context.Background(), authCfg.Org, authCfg.Project, authCfg.PAT)
 	if err != nil {
@@ -543,6 +545,10 @@ var repoListCmd = &cobra.Command{
 
 		if _, err := cfg.Load(); err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+
+		if err := checkProfileScope(cfg, ScopeRepos); err != nil {
+			return err
 		}
 
 		org := cfg.GetOrganization()

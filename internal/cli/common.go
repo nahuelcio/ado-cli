@@ -10,6 +10,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	ScopeWorkItems = "workitems"
+	ScopeRepos     = "repos"
+	ScopePRs       = "prs"
+)
+
 type authConfig struct {
 	Org     string
 	Project string
@@ -62,6 +68,19 @@ func getConfigAndAuth(cmd *cobra.Command) (*config.ConfigLoader, *authConfig, er
 		Project: proj,
 		PAT:     pat,
 	}, nil
+}
+
+func checkProfileScope(cfg *config.ConfigLoader, requiredScope string) error {
+	profile := cfg.GetActiveProfile()
+	if profile == nil {
+		return fmt.Errorf("no active profile found")
+	}
+
+	if !profile.HasScope(requiredScope) {
+		return fmt.Errorf("profile '%s' does not have %s scope", cfg.GetActiveProfileName(), requiredScope)
+	}
+
+	return nil
 }
 
 func getRepoFromFlags(cmd *cobra.Command) (string, error) {

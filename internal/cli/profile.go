@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -18,11 +19,13 @@ Profiles store organization URLs, project names, and authentication settings.
 This allows you to work with multiple Azure DevOps instances seamlessly.
 
 Commands:
-  add     Create a new profile with org URL and project
-  list    Show all configured profiles
-  show    Display details for a specific profile
-  use     Set a profile as default (active)
-  delete  Remove a profile
+  add               Create a new profile with org URL and project
+  list              Show all configured profiles
+  show              Display details for a specific profile
+  use               Set a profile as default (active)
+  delete            Remove a profile
+  set-permissions   Set the scopes/permissions for a profile
+  show-permissions  Show the scopes for a profile
 
 Examples:
   # Add a new profile
@@ -35,7 +38,14 @@ Examples:
   ado profile use --name work
 
   # Show profile details
-  ado profile show --name work`,
+  ado profile show --name work
+
+  # Set profile permissions (scopes)
+  ado profile set-permissions --name yoizen-yflow --scopes repos,prs
+  ado profile set-permissions --name yoizen-ysocial --scopes workitems,repos,prs
+
+  # Show profile permissions
+  ado profile show-permissions --name yoizen-yflow`,
 }
 
 var profileAddCmd = &cobra.Command{
@@ -283,7 +293,7 @@ Examples:
 		for org, profiles := range orgGroups {
 			fmt.Printf("📁 Organization: %s\n", org)
 			fmt.Printf("   Profiles sharing PAT (%d):\n", len(profiles))
-			
+
 			for _, name := range profiles {
 				p := profileDetails[name]
 				marker := "  "
@@ -300,10 +310,125 @@ Examples:
 		fmt.Println("   - All profiles with the same org automatically share the PAT")
 		fmt.Println("   - No need to login multiple times for different projects!")
 		fmt.Println()
-		
+
 		if len(orgGroups) > 1 {
 			fmt.Printf("⚠ You have profiles in %d different organizations.\n", len(orgGroups))
 			fmt.Println("   Each organization requires its own PAT.")
+		}
+
+		return nil
+	},
+}
+
+var availableScopes = []string{"workitems", "repos", "prs"}
+
+var profileSetPermissionsCmd = &cobra.Command{
+	Use:   "set-permissions",
+	Short: "Set the scopes/permissions for a profile",
+	Long: `Set which scopes (workitems, repos, prs) a profile has access to.
+
+Available scopes:
+  workitems - Access to work item commands
+  repos     - Access to repository commands
+  prs       - Access to pull request commands
+
+Examples:
+  # Set profile to have only repos and prs scopes
+  ado profile set-permissions --name yoizen-yflow --scopes repos,prs
+
+  # Set profile to have all scopes
+  ado profile set-permissions --name yoizen-ysocial --scopes workitems,repos,prs`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+		scopesStr, _ := cmd.Flags().GetString("scopes")
+
+		if name == "" {
+			return fmt.Errorf("profile name is required (--name)")
+		}
+		if scopesStr == "" {
+			return fmt.Errorf("scopes are required (--scopes)")
+		}
+
+		requestedScopes := strings.Split(scopesStr, ",")
+		var validScopes []string
+		for _, s := range requestedScopes {
+			s = strings.TrimSpace(s)
+			valid := false
+			for _, allowed := range availableScopes {
+				if s == allowed {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				return fmt.Errorf("invalid scope '%s'. Valid scopes are: %s", s, strings.Join(availableScopes, ", "))
+			}
+			validScopes = append(validScopes, s)
+		}
+
+		loader := config.NewConfigLoader("")
+		cfg, err := loader.Load()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+
+		profile, ok := cfg.Profiles[name]
+		if !ok {
+			return fmt.Errorf("profile '%s' does not exist", name)
+		}
+
+		profile.Scopes = validScopes
+		loader.SetProfile(name, profile)
+
+		if err := loader.Save(); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		fmt.Printf("Profile '%s' scopes updated to: %s\n", name, strings.Join(validScopes, ", "))
+		return nil
+	},
+}
+
+var profileShowPermissionsCmd = &cobra.Command{
+	Use:   "show-permissions",
+	Short: "Show the scopes for a profile",
+	Long: `Show which scopes (workitems, repos, prs) a profile has access to.
+
+Examples:
+  # Show permissions for a profile
+  ado profile show-permissions --name yoizen-yflow`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+
+		if name == "" {
+			return fmt.Errorf("profile name is required (--name)")
+		}
+
+		loader := config.NewConfigLoader("")
+		cfg, err := loader.Load()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+
+		profile, ok := cfg.Profiles[name]
+		if !ok {
+			return fmt.Errorf("profile '%s' does not exist", name)
+		}
+
+		fmt.Printf("Profile: %s\n", name)
+		if len(profile.Scopes) == 0 {
+			fmt.Println("Scopes: (none)")
+		} else {
+			fmt.Printf("Scopes: %s\n", strings.Join(profile.Scopes, ", "))
+		}
+
+		fmt.Println("\nAllowed commands:")
+		for _, scope := range availableScopes {
+			allowed := "❌"
+			if profile.HasScope(scope) {
+				allowed = "✓"
+			}
+			fmt.Printf("  %s %s\n", allowed, scope)
 		}
 
 		return nil
@@ -330,10 +455,20 @@ func init() {
 	profileSyncCmd.Flags().String("from", "", "Source profile for sync check")
 	profileSyncCmd.Flags().String("to", "", "Target profile for sync check")
 
+	profileSetPermissionsCmd.Flags().String("name", "", "Profile name")
+	profileSetPermissionsCmd.Flags().String("scopes", "", "Comma-separated list of scopes (workitems, repos, prs)")
+	_ = profileSetPermissionsCmd.MarkFlagRequired("name")
+	_ = profileSetPermissionsCmd.MarkFlagRequired("scopes")
+
+	profileShowPermissionsCmd.Flags().String("name", "", "Profile name")
+	_ = profileShowPermissionsCmd.MarkFlagRequired("name")
+
 	profileCmd.AddCommand(profileAddCmd)
 	profileCmd.AddCommand(profileListCmd)
 	profileCmd.AddCommand(profileDeleteCmd)
 	profileCmd.AddCommand(profileShowCmd)
 	profileCmd.AddCommand(profileUseCmd)
 	profileCmd.AddCommand(profileSyncCmd)
+	profileCmd.AddCommand(profileSetPermissionsCmd)
+	profileCmd.AddCommand(profileShowPermissionsCmd)
 }

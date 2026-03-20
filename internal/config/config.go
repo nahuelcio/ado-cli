@@ -34,6 +34,16 @@ type Profile struct {
 	Organization string          `json:"organization" yaml:"organization"`
 	Project      string          `json:"project" yaml:"project"`
 	Auth         auth.AuthConfig `json:"auth" yaml:"auth"`
+	Scopes       []string        `json:"scopes" yaml:"scopes"`
+}
+
+func (p *Profile) HasScope(scope string) bool {
+	for _, s := range p.Scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
 }
 
 type ConfigLoader struct {
@@ -54,6 +64,7 @@ func DefaultConfig() Config {
 					Type:   auth.AuthTypePAT,
 					Scopes: []string{"vso.packaging", "vso.code", "vso.project"},
 				},
+				Scopes: []string{"workitems", "repos", "prs"},
 			},
 		},
 	}
@@ -377,6 +388,7 @@ func (c *ConfigLoader) mergeWithDefaults(loaded Config) Config {
 					ManagedID:    profile.Auth.ManagedID,
 					Scopes:       profile.Auth.Scopes,
 				},
+				Scopes: profile.Scopes,
 			}
 		}
 	}

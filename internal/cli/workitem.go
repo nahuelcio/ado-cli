@@ -52,6 +52,10 @@ func getWorkItemClient(cmd *cobra.Command) (api.WorkItemClient, string, *config.
 		return nil, "", nil, err
 	}
 
+	if err := checkProfileScope(cfg, ScopeWorkItems); err != nil {
+		return nil, "", nil, err
+	}
+
 	client, err := api.GetWorkItemClient(context.Background(), authCfg.Org, authCfg.Project, authCfg.PAT)
 	if err != nil {
 		return nil, "", nil, err
