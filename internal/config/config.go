@@ -290,7 +290,7 @@ func (c *ConfigLoader) GetAuth() *auth.AuthConfig {
 		return authConfig
 	}
 
-	if authConfig.PAT == "" && profile != nil && profile.Organization != "" {
+	if (authConfig.PAT == "" || authConfig.PAT == "***") && profile != nil && profile.Organization != "" {
 		credManager, err := auth.NewCredentialManager("")
 		if err == nil {
 			pat, getErr := credManager.GetPAT(auth.ServicePAT, profile.Organization)
