@@ -344,17 +344,16 @@ var prChangesCmd = &cobra.Command{
 
 var prDiffCmd = &cobra.Command{
 	Use:   "diff",
-	Short: "Show pull request diff with file metadata",
-	Long: `Show the diff/changes of a pull request with file metadata for code review.
+	Short: "Show pull request code diff",
+	Long: `Show the diff/changes of a pull request with file metadata and code content.
 
-This command retrieves the list of changed files with metadata useful for LLM code review:
+This command fetches file contents and renders a unified diff for each file when possible:
 - File paths and change types (add/edit/delete/rename)
 - Original path (for renames)
 - Change statistics (additions/deletions)
-- Binary file detection
+- Binary file and size detection
 
-Note: Azure DevOps API returns file metadata but not full diff content. 
-For viewing actual code changes, use the web interface or fetch individual files.
+Large or binary files are still listed, but their content is omitted when a textual diff cannot be rendered.
 
 Examples:
   # Show diff for a PR (all files)

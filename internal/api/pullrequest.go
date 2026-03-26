@@ -1,12 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/pmezard/go-difflib/difflib"
 )
 
 type ChangeType string
@@ -346,6 +351,8 @@ type ChangeSummary struct {
 	FilesEdited       int `json:"filesEdited"`
 	FilesDeleted      int `json:"filesDeleted"`
 }
+
+const maxDiffContentBytes = 5 * 1024 * 1024
 
 type PullRequestClient interface {
 	ListPullRequests(ctx context.Context, project, repo string, status PullRequestStatus) ([]PullRequest, error)
@@ -773,6 +780,15 @@ func (c *pullRequestClient) GetPullRequestDiff(ctx context.Context, project, rep
 		diff.TargetBranch = *pr.TargetRefName
 	}
 
+	sourceFallbackVersion := ""
+	if pr.LastMergeSourceCommit != nil {
+		sourceFallbackVersion = pr.LastMergeSourceCommit.CommitID
+	}
+	targetFallbackVersion := ""
+	if pr.LastMergeTargetCommit != nil {
+		targetFallbackVersion = pr.LastMergeTargetCommit.CommitID
+	}
+
 	// Process each file (limit to maxFiles)
 	fileCount := 0
 	for _, change := range changes {
@@ -795,10 +811,214 @@ func (c *pullRequestClient) GetPullRequestDiff(ctx context.Context, project, rep
 			fileDiff.OriginalPath = *change.OriginalPath
 		}
 
+		oldPath := fileDiff.Path
+		if fileDiff.OriginalPath != "" {
+			oldPath = fileDiff.OriginalPath
+		}
+
+		sourceVersion := versionOrFallback(change.SourceVersion, sourceFallbackVersion)
+		targetVersion := versionOrFallback(change.TargetVersion, targetFallbackVersion)
+
+		switch change.ChangeType {
+		case ChangeTypeAdd:
+			newContent, isBinary, isTooLarge, err := c.fetchItemContent(ctx, project, repo, fileDiff.Path, targetVersion)
+			if err != nil {
+				fileDiff.Diff = fmt.Sprintf("Unable to load new content for %s: %v", fileDiff.Path, err)
+			} else if isBinary {
+				fileDiff.IsBinary = true
+				fileDiff.Diff = fmt.Sprintf("Binary content omitted for added file %s.", fileDiff.Path)
+			} else if isTooLarge {
+				fileDiff.IsTooLarge = true
+				fileDiff.Diff = fmt.Sprintf("Content omitted for %s because it exceeds the 5 MB diff limit.", fileDiff.Path)
+			} else {
+				diffText, additions, deletions, err := renderUnifiedDiff("/dev/null", fileDiff.Path, "", newContent)
+				if err != nil {
+					fileDiff.Diff = fmt.Sprintf("Unable to render diff for %s: %v", fileDiff.Path, err)
+				} else {
+					fileDiff.Diff = diffText
+					fileDiff.Additions = additions
+					fileDiff.Deletions = deletions
+				}
+			}
+
+		case ChangeTypeDelete:
+			oldContent, isBinary, isTooLarge, err := c.fetchItemContent(ctx, project, repo, oldPath, sourceVersion)
+			if err != nil {
+				fileDiff.Diff = fmt.Sprintf("Unable to load original content for %s: %v", oldPath, err)
+			} else if isBinary {
+				fileDiff.IsBinary = true
+				fileDiff.Diff = fmt.Sprintf("Binary content omitted for deleted file %s.", oldPath)
+			} else if isTooLarge {
+				fileDiff.IsTooLarge = true
+				fileDiff.Diff = fmt.Sprintf("Content omitted for %s because it exceeds the 5 MB diff limit.", oldPath)
+			} else {
+				diffText, additions, deletions, err := renderUnifiedDiff(oldPath, "/dev/null", oldContent, "")
+				if err != nil {
+					fileDiff.Diff = fmt.Sprintf("Unable to render diff for %s: %v", oldPath, err)
+				} else {
+					fileDiff.Diff = diffText
+					fileDiff.Additions = additions
+					fileDiff.Deletions = deletions
+				}
+			}
+
+		case ChangeTypeEdit, ChangeTypeRename:
+			oldContent, oldIsBinary, oldIsTooLarge, err := c.fetchItemContent(ctx, project, repo, oldPath, sourceVersion)
+			if err != nil {
+				fileDiff.Diff = fmt.Sprintf("Unable to load original content for %s: %v", oldPath, err)
+				break
+			}
+
+			newContent, newIsBinary, newIsTooLarge, err := c.fetchItemContent(ctx, project, repo, fileDiff.Path, targetVersion)
+			if err != nil {
+				fileDiff.Diff = fmt.Sprintf("Unable to load new content for %s: %v", fileDiff.Path, err)
+				break
+			}
+
+			fileDiff.IsBinary = oldIsBinary || newIsBinary
+			fileDiff.IsTooLarge = oldIsTooLarge || newIsTooLarge
+
+			if fileDiff.IsBinary {
+				fileDiff.Diff = fmt.Sprintf("Binary content omitted for %s.", fileDiff.Path)
+				break
+			}
+			if fileDiff.IsTooLarge {
+				fileDiff.Diff = fmt.Sprintf("Content omitted for %s because it exceeds the 5 MB diff limit.", fileDiff.Path)
+				break
+			}
+
+			diffText, additions, deletions, err := renderUnifiedDiff(oldPath, fileDiff.Path, oldContent, newContent)
+			if err != nil {
+				fileDiff.Diff = fmt.Sprintf("Unable to render diff for %s: %v", fileDiff.Path, err)
+				break
+			}
+			fileDiff.Diff = diffText
+			fileDiff.Additions = additions
+			fileDiff.Deletions = deletions
+
+		default:
+			fileDiff.Diff = fmt.Sprintf("No textual diff available for change type %s.", fileDiff.ChangeType)
+		}
+
 		diff.Files = append(diff.Files, fileDiff)
+		diff.TotalAdditions += fileDiff.Additions
+		diff.TotalDeletions += fileDiff.Deletions
 	}
 
 	return diff, nil
+}
+
+func versionOrFallback(version *string, fallback string) string {
+	if version != nil && strings.TrimSpace(*version) != "" {
+		return *version
+	}
+	return fallback
+}
+
+func renderUnifiedDiff(fromPath, toPath, originalContent, newContent string) (string, int, int, error) {
+	diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+		A:        difflib.SplitLines(originalContent),
+		B:        difflib.SplitLines(newContent),
+		FromFile: fromPath,
+		ToFile:   toPath,
+		Context:  3,
+	})
+	if err != nil {
+		return "", 0, 0, err
+	}
+
+	additions, deletions := countUnifiedDiffStats(diff)
+	if strings.TrimSpace(diff) == "" {
+		if fromPath != toPath {
+			diff = fmt.Sprintf("No textual changes detected between %s and %s.", fromPath, toPath)
+		} else {
+			diff = fmt.Sprintf("No textual changes detected for %s.", toPath)
+		}
+	}
+
+	return diff, additions, deletions, nil
+}
+
+func countUnifiedDiffStats(diff string) (int, int) {
+	additions := 0
+	deletions := 0
+
+	for _, line := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "@@"):
+			continue
+		case strings.HasPrefix(line, "+"):
+			additions++
+		case strings.HasPrefix(line, "-"):
+			deletions++
+		}
+	}
+
+	return additions, deletions
+}
+
+func buildItemContentURL(baseURL, project, repo, itemPath, version string) string {
+	params := neturl.Values{}
+	params.Set("path", itemPath)
+	params.Set("versionDescriptor.version", version)
+	params.Set("versionDescriptor.versionType", "commit")
+	params.Set("includeContent", "true")
+	params.Set("download", "false")
+	params.Set("resolveLfs", "true")
+	params.Set("api-version", "7.1")
+
+	return fmt.Sprintf("%s/%s/_apis/git/repositories/%s/items?%s",
+		strings.TrimRight(baseURL, "/"),
+		neturl.PathEscape(project),
+		neturl.PathEscape(repo),
+		params.Encode())
+}
+
+func isBinaryContent(content []byte) bool {
+	return bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content)
+}
+
+func (c *pullRequestClient) fetchItemContent(ctx context.Context, project, repo, itemPath, version string) (string, bool, bool, error) {
+	if strings.TrimSpace(version) == "" {
+		return "", false, false, fmt.Errorf("missing version for %s", itemPath)
+	}
+
+	if err := c.client.RateLimiter.WaitForToken(ctx, 1); err != nil {
+		return "", false, false, err
+	}
+
+	requestURL := buildItemContentURL(c.client.Config.BaseURL, project, repo, itemPath, version)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return "", false, false, fmt.Errorf("failed to create content request for %s: %w", itemPath, err)
+	}
+
+	req.Header.Set("Authorization", "Basic "+c.client.authHeader)
+	req.Header.Set("Accept", "*/*")
+
+	resp, err := c.client.httpClient.Do(req)
+	if err != nil {
+		return "", false, false, fmt.Errorf("failed to get item content for %s: %w", itemPath, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", false, false, fmt.Errorf("failed to get item content for %s: status %d, body: %s", itemPath, resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDiffContentBytes+1))
+	if err != nil {
+		return "", false, false, fmt.Errorf("failed to read item content for %s: %w", itemPath, err)
+	}
+	if len(body) > maxDiffContentBytes {
+		return "", false, true, nil
+	}
+	if isBinaryContent(body) {
+		return "", true, false, nil
+	}
+
+	return string(body), false, false, nil
 }
 
 func (c *pullRequestClient) VoteReviewer(ctx context.Context, project, repo string, prID int, userID string, vote int) error {

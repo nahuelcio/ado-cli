@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/99designs/keyring v1.2.2
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
 	gopkg.in/yaml.v3 v3.0.1
