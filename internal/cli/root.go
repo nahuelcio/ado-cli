@@ -67,6 +67,7 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(capabilitiesCmd)
 	rootCmd.AddCommand(autocompleteCmd)
+	rootCmd.AddCommand(dashboardCmd)
 }
 
 func initConfig() {

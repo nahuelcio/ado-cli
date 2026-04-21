@@ -7,6 +7,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/nahuelcio/ado-cli/internal/api"
 	"github.com/nahuelcio/ado-cli/internal/config"
@@ -18,9 +20,10 @@ import (
 type OutputFormat string
 
 const (
-	FormatTable OutputFormat = "table"
-	FormatJSON  OutputFormat = "json"
-	FormatYAML  OutputFormat = "yaml"
+	FormatTable    OutputFormat = "table"
+	FormatJSON     OutputFormat = "json"
+	FormatYAML     OutputFormat = "yaml"
+	FormatMarkdown OutputFormat = "markdown"
 )
 
 func (f *OutputFormat) String() string {
@@ -32,11 +35,11 @@ func (f *OutputFormat) String() string {
 
 func (f *OutputFormat) Set(value string) error {
 	switch OutputFormat(value) {
-	case FormatTable, FormatJSON, FormatYAML:
+	case FormatTable, FormatJSON, FormatYAML, FormatMarkdown:
 		*f = OutputFormat(value)
 		return nil
 	default:
-		return fmt.Errorf("invalid format %q: use table, json, or yaml", value)
+		return fmt.Errorf("invalid format %q: use table, json, yaml, or markdown", value)
 	}
 }
 
@@ -78,10 +81,11 @@ func printOutput(data interface{}, format OutputFormat) error {
 			return fmt.Errorf("failed to marshal YAML: %w", err)
 		}
 		fmt.Println(string(output))
+	case FormatMarkdown:
+		printMarkdown(data)
 	case FormatTable:
 		printTable(data)
 	default:
-		// Fallback to YAML for unknown formats
 		output, err := yaml.Marshal(data)
 		if err != nil {
 			return fmt.Errorf("failed to marshal YAML: %w", err)
@@ -89,6 +93,190 @@ func printOutput(data interface{}, format OutputFormat) error {
 		fmt.Println(string(output))
 	}
 	return nil
+}
+
+func printMarkdown(data interface{}) {
+	switch v := data.(type) {
+	case []map[string]interface{}:
+		printMarkdownList(v)
+	case map[string]interface{}:
+		if _, ok := v["by_parent"]; ok {
+			printMarkdownDashboard(v)
+		} else {
+			printMarkdownSingle(v)
+		}
+	default:
+		fmt.Printf("%+v\n", data)
+	}
+}
+
+func printMarkdownList(items []map[string]interface{}) {
+	if len(items) == 0 {
+		fmt.Println("No work items found")
+		return
+	}
+
+	fmt.Printf("# Work Items (%d)\n\n", len(items))
+	for _, item := range items {
+		id, _ := item["id"].(int)
+		title, _ := item["title"].(string)
+		state, _ := item["state"].(string)
+		wiType, _ := item["type"].(string)
+		assignedTo, _ := item["assigned_to"].(string)
+
+		fmt.Printf("## #%d - %s\n", id, title)
+		fmt.Printf("- **State:** %s\n", state)
+		if wiType != "" {
+			fmt.Printf("- **Type:** %s\n", wiType)
+		}
+		if assignedTo != "" {
+			fmt.Printf("- **Assigned To:** %s\n", assignedTo)
+		}
+		if parentID := extractParentIDFromRelated(item); parentID > 0 {
+			fmt.Printf("- **Parent:** #%d\n", parentID)
+		}
+
+		if desc, ok := item["description"].(string); ok && desc != "" {
+			fmt.Printf("\n> %s\n", strings.ReplaceAll(desc, "\n", "\n> "))
+		}
+
+		if comments, ok := item["comments"].([]map[string]interface{}); ok && len(comments) > 0 {
+			fmt.Printf("\n**Comments (%d):**\n", len(comments))
+			for i, c := range comments {
+				author, _ := c["author"].(string)
+				date, _ := c["date"].(string)
+				text, _ := c["text"].(string)
+				fmt.Printf("%d. **%s** (%s): %s\n", i+1, author, date, text)
+			}
+		}
+
+		fmt.Println("\n---")
+	}
+}
+
+func printMarkdownGrouped(groups []map[string]interface{}) {
+	if len(groups) == 0 {
+		fmt.Println("No work items found")
+		return
+	}
+
+	fmt.Println("# Work Items by Parent")
+	for _, group := range groups {
+		parentLabel, _ := group["parent_label"].(string)
+		parentState, _ := group["parent_state"].(string)
+		items, _ := group["items"].([]map[string]interface{})
+
+		if parentLabel == "" {
+			parentLabel = "No Parent"
+		}
+
+		fmt.Printf("## %s\n", parentLabel)
+		if parentState != "" {
+			fmt.Printf("**State:** %s\n\n", parentState)
+		}
+
+		if parentComments, ok := group["parent_comments"].([]map[string]interface{}); ok && len(parentComments) > 0 {
+			fmt.Println("**Parent Comments:**")
+			for _, c := range parentComments {
+				author, _ := c["author"].(string)
+				text, _ := c["text"].(string)
+				fmt.Printf("- **%s**: %s\n", author, text)
+			}
+			fmt.Println()
+		}
+
+		for _, item := range items {
+			id, _ := item["id"].(int)
+			title, _ := item["title"].(string)
+			state, _ := item["state"].(string)
+			wiType, _ := item["type"].(string)
+
+			fmt.Printf("### #%d - %s\n", id, title)
+			fmt.Printf("- **State:** %s\n", state)
+			if wiType != "" {
+				fmt.Printf("- **Type:** %s\n", wiType)
+			}
+
+			if desc, ok := item["description"].(string); ok && desc != "" {
+				fmt.Printf("\n> %s\n", strings.ReplaceAll(desc, "\n", "\n> "))
+			}
+
+			if comments, ok := item["comments"].([]map[string]interface{}); ok && len(comments) > 0 {
+				fmt.Printf("\n**Comments (%d):**\n", len(comments))
+				for i, c := range comments {
+					author, _ := c["author"].(string)
+					text, _ := c["text"].(string)
+					fmt.Printf("%d. **%s**: %s\n", i+1, author, text)
+				}
+			}
+
+			fmt.Println()
+		}
+
+		fmt.Println("---")
+	}
+}
+
+func printMarkdownSingle(item map[string]interface{}) {
+	id, _ := item["id"].(int)
+	title, _ := item["title"].(string)
+	state, _ := item["state"].(string)
+
+	fmt.Printf("# #%d - %s\n", id, title)
+	fmt.Printf("- **State:** %s\n", state)
+	for k, v := range item {
+		switch k {
+		case "id", "title", "state", "comments":
+			continue
+		}
+		fmt.Printf("- **%s:** %v\n", k, v)
+	}
+
+	if comments, ok := item["comments"].([]map[string]interface{}); ok && len(comments) > 0 {
+		fmt.Printf("\n## Comments\n")
+		for i, c := range comments {
+			author, _ := c["author"].(string)
+			date, _ := c["date"].(string)
+			text, _ := c["text"].(string)
+			fmt.Printf("%d. **%s** (%s): %s\n", i+1, author, date, text)
+		}
+	}
+}
+
+func printMarkdownDashboard(data map[string]interface{}) {
+	assignedTo, _ := data["assigned_to"].(string)
+	fmt.Printf("# Dashboard - %s\n\n", assignedTo)
+
+	if totals, ok := data["totals"].(map[string]interface{}); ok {
+		fmt.Println("## Totals")
+		for state, count := range totals {
+			fmt.Printf("- **%s:** %v\n", state, count)
+		}
+		fmt.Println()
+	}
+
+	if byParent, ok := data["by_parent"].([]map[string]interface{}); ok {
+		fmt.Println("## By Parent")
+		for _, group := range byParent {
+			parentLabel, _ := group["parent_label"].(string)
+			parentState, _ := group["parent_state"].(string)
+			items, _ := group["items"].([]map[string]interface{})
+
+			fmt.Printf("### %s", parentLabel)
+			if parentState != "" {
+				fmt.Printf(" (%s)", parentState)
+			}
+			fmt.Println()
+
+			for _, item := range items {
+				id, _ := item["id"].(int)
+				title, _ := item["title"].(string)
+				state, _ := item["state"].(string)
+				fmt.Printf("- #%d **%s** [%s]\n", id, title, state)
+			}
+			fmt.Println()
+		}
+	}
 }
 
 func printTable(data interface{}) {
@@ -146,7 +334,7 @@ Examples:
 var workItemListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List work items",
-	Long:  `List work items. Filters: --state, --type, --assigned-to, --mine.`,
+	Long:  `List work items. Filters: --state, --type, --assigned-to, --mine, --all-states.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, project, _, err := getWorkItemClient(cmd)
 		if err != nil {
@@ -158,6 +346,9 @@ var workItemListCmd = &cobra.Command{
 		assignedTo, _ := cmd.Flags().GetString("assigned-to")
 		mine, _ := cmd.Flags().GetBool("mine")
 		full, _ := cmd.Flags().GetBool("full")
+		withDetails, _ := cmd.Flags().GetBool("with-details")
+		expandParents, _ := cmd.Flags().GetBool("expand-parents")
+		groupBy, _ := cmd.Flags().GetString("group-by")
 
 		if mine && assignedTo != "" {
 			return fmt.Errorf("--mine cannot be used together with --assigned-to")
@@ -185,8 +376,30 @@ var workItemListCmd = &cobra.Command{
 			llmData = append(llmData, extractLLMWorkItemData(&wi))
 		}
 
+		if withDetails {
+			fetchCommentsForItems(client, project, llmData)
+		}
+
+		if expandParents {
+			fetchAndInlineParents(client, project, llmData)
+		}
+
 		if format == "" {
 			format = FormatYAML
+		}
+
+		if groupBy == "parent" {
+			grouped := groupByParent(llmData)
+			if format == FormatMarkdown {
+				printMarkdownGrouped(grouped)
+				return nil
+			}
+			return printOutput(grouped, format)
+		}
+
+		if format == FormatMarkdown {
+			printMarkdownList(llmData)
+			return nil
 		}
 
 		return printOutput(llmData, format)
@@ -274,6 +487,210 @@ func extractRelatedIDs(relations []api.WorkItemRelation) []int {
 	return ids
 }
 
+func extractParentIDFromRelated(item map[string]interface{}) int {
+	related, ok := item["related"].([]map[string]interface{})
+	if !ok {
+		return 0
+	}
+	for _, rel := range related {
+		if relType, ok := rel["type"].(string); ok && relType == "parent" {
+			if idStr, ok := rel["id"].(string); ok {
+				if id, err := strconv.Atoi(idStr); err == nil {
+					return id
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func fetchCommentsForItems(client api.WorkItemClient, project string, items []map[string]interface{}) {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5)
+	var mu sync.Mutex
+
+	for i, item := range items {
+		id, ok := item["id"].(int)
+		if !ok {
+			continue
+		}
+		commentCount := 0
+		if cc, ok := item["comment_count"].(int); ok {
+			commentCount = cc
+		}
+		if commentCount == 0 {
+			continue
+		}
+
+		wg.Add(1)
+		go func(idx int, itemID int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			comments, err := client.GetComments(context.Background(), project, itemID)
+			if err != nil {
+				return
+			}
+
+			var simpleComments []map[string]interface{}
+			for _, c := range comments {
+				author := ""
+				if c.CreatedBy != nil {
+					author = c.CreatedBy.DisplayName
+				}
+				simpleComments = append(simpleComments, map[string]interface{}{
+					"author": author,
+					"date":   c.CreatedDate,
+					"text":   cleanHTML(c.Text),
+				})
+			}
+
+			mu.Lock()
+			items[idx]["comments"] = simpleComments
+			mu.Unlock()
+		}(i, id)
+	}
+	wg.Wait()
+}
+
+func fetchAndInlineParents(client api.WorkItemClient, project string, items []map[string]interface{}) {
+	parentIDSet := make(map[int]bool)
+	for _, item := range items {
+		if pid := extractParentIDFromRelated(item); pid > 0 {
+			parentIDSet[pid] = true
+		}
+	}
+
+	if len(parentIDSet) == 0 {
+		return
+	}
+
+	parentIDs := make([]int, 0, len(parentIDSet))
+	for id := range parentIDSet {
+		parentIDs = append(parentIDs, id)
+	}
+
+	parentWIs, err := client.GetWorkItemsBatch(context.Background(), project, parentIDs)
+	if err != nil {
+		return
+	}
+
+	parentMap := make(map[int]*api.WorkItem)
+	for i := range parentWIs {
+		parentMap[parentWIs[i].ID] = &parentWIs[i]
+	}
+
+	parentComments := make(map[int][]map[string]interface{})
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5)
+	var mu sync.Mutex
+
+	for pid, pw := range parentMap {
+		if cc, ok := pw.Fields["System.CommentCount"].(float64); ok && cc > 0 {
+			wg.Add(1)
+			go func(parentID int) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				comments, err := client.GetComments(context.Background(), project, parentID)
+				if err != nil {
+					return
+				}
+				var simpleComments []map[string]interface{}
+				for _, c := range comments {
+					author := ""
+					if c.CreatedBy != nil {
+						author = c.CreatedBy.DisplayName
+					}
+					simpleComments = append(simpleComments, map[string]interface{}{
+						"author": author,
+						"date":   c.CreatedDate,
+						"text":   cleanHTML(c.Text),
+					})
+				}
+				mu.Lock()
+				parentComments[parentID] = simpleComments
+				mu.Unlock()
+			}(pid)
+		}
+	}
+	wg.Wait()
+
+	for _, item := range items {
+		pid := extractParentIDFromRelated(item)
+		if pid == 0 {
+			continue
+		}
+		pw, ok := parentMap[pid]
+		if !ok {
+			continue
+		}
+		parentData := map[string]interface{}{
+			"id":    pw.ID,
+			"title": getStringField(pw.Fields, "System.Title"),
+			"state": getStringField(pw.Fields, "System.State"),
+		}
+		if desc := getStringField(pw.Fields, "System.Description"); desc != "" {
+			parentData["description"] = cleanHTML(desc)
+		}
+		if comments, ok := parentComments[pid]; ok && len(comments) > 0 {
+			parentData["comments"] = comments
+		}
+		item["parent"] = parentData
+	}
+}
+
+func groupByParent(items []map[string]interface{}) []map[string]interface{} {
+	groups := make(map[string][]map[string]interface{})
+	var groupOrder []string
+
+	for _, item := range items {
+		pid := extractParentIDFromRelated(item)
+		var key string
+		if pid > 0 {
+			key = strconv.Itoa(pid)
+			if parentData, ok := item["parent"].(map[string]interface{}); ok {
+				if title, ok := parentData["title"].(string); ok {
+					key = fmt.Sprintf("#%d %s", pid, title)
+				}
+			}
+		} else {
+			key = "__no_parent__"
+		}
+
+		if _, exists := groups[key]; !exists {
+			groupOrder = append(groupOrder, key)
+		}
+		groups[key] = append(groups[key], item)
+	}
+
+	var result []map[string]interface{}
+	for _, key := range groupOrder {
+		group := map[string]interface{}{
+			"items": groups[key],
+		}
+		if key == "__no_parent__" {
+			group["parent_label"] = "No Parent"
+		} else {
+			group["parent_label"] = key
+			if len(groups[key]) > 0 {
+				if parentData, ok := groups[key][0]["parent"].(map[string]interface{}); ok {
+					if state, ok := parentData["state"].(string); ok {
+						group["parent_state"] = state
+					}
+					if comments, ok := parentData["comments"].([]map[string]interface{}); ok {
+						group["parent_comments"] = comments
+					}
+				}
+			}
+		}
+		result = append(result, group)
+	}
+	return result
+}
+
 var workItemGetCmd = &cobra.Command{
 	Use:   "get",
 	Short: "Get a work item",
@@ -328,13 +745,58 @@ var workItemGetCmd = &cobra.Command{
 		relatedFull, _ := cmd.Flags().GetBool("related-full")
 		if relatedFull && len(wi.Relations) > 0 {
 			relatedIDs := extractRelatedIDs(wi.Relations)
+			parentID := 0
+			for _, rel := range wi.Relations {
+				if rel.Rel == "System.LinkTypes.Hierarchy-Reverse" {
+					parts := strings.Split(rel.URL, "/")
+					if len(parts) > 0 {
+						if id, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
+							parentID = id
+						}
+					}
+				}
+			}
+
+			if parentID > 0 {
+				allIDs := append([]int{parentID}, relatedIDs...)
+				relatedIDs = allIDs
+			}
+
 			if len(relatedIDs) > 0 {
 				relatedWIs, err := client.GetWorkItemsBatch(context.Background(), project, relatedIDs)
 				if err == nil {
 					var qaFeedbacks []map[string]interface{}
+					var parentData map[string]interface{}
 					for _, relatedWI := range relatedWIs {
 						wiType := getStringField(relatedWI.Fields, "System.WorkItemType")
-						if wiType == "QA Feedback" {
+						if relatedWI.ID == parentID {
+							parentData = map[string]interface{}{
+								"id":    relatedWI.ID,
+								"title": getStringField(relatedWI.Fields, "System.Title"),
+								"state": getStringField(relatedWI.Fields, "System.State"),
+							}
+							if desc := getStringField(relatedWI.Fields, "System.Description"); desc != "" {
+								parentData["description"] = cleanHTML(desc)
+							}
+							if cc, ok := relatedWI.Fields["System.CommentCount"].(float64); ok && cc > 0 {
+								comments, err := client.GetComments(context.Background(), project, parentID)
+								if err == nil && len(comments) > 0 {
+									var simpleComments []map[string]interface{}
+									for _, c := range comments {
+										author := ""
+										if c.CreatedBy != nil {
+											author = c.CreatedBy.DisplayName
+										}
+										simpleComments = append(simpleComments, map[string]interface{}{
+											"author": author,
+											"date":   c.CreatedDate,
+											"text":   cleanHTML(c.Text),
+										})
+									}
+									parentData["comments"] = simpleComments
+								}
+							}
+						} else if wiType == "QA Feedback" {
 							desc := getStringField(relatedWI.Fields, "System.Description")
 							qaFeedbacks = append(qaFeedbacks, map[string]interface{}{
 								"id":          relatedWI.ID,
@@ -344,6 +806,9 @@ var workItemGetCmd = &cobra.Command{
 								"url":         relatedWI.Links["html"].HRef,
 							})
 						}
+					}
+					if parentData != nil {
+						output["parent"] = parentData
 					}
 					if len(qaFeedbacks) > 0 {
 						output["qa_feedbacks_count"] = len(qaFeedbacks)
@@ -526,50 +991,135 @@ var workItemUpdateCmd = &cobra.Command{
 	RunE:  workItemFieldCmd.RunE,
 }
 
+var dashboardCmd = &cobra.Command{
+	Use:   "dashboard",
+	Short: "Show your work dashboard",
+	Long: `Show a summary of all work items assigned to you, grouped by parent.
+Includes totals by state and hierarchical view.
+
+Aliases: ado my-work
+Examples:
+  ado dashboard
+  ado dashboard --format markdown
+  ado dashboard --format json`,
+	Aliases: []string{"my-work"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, project, _, err := getWorkItemClient(cmd)
+		if err != nil {
+			return err
+		}
+
+		filters := api.WorkItemFilters{
+			Mine:  true,
+			Limit: 200,
+		}
+
+		workItems, err := client.ListWorkItems(context.Background(), project, filters)
+		if err != nil {
+			return fmt.Errorf("failed to list work items: %w", err)
+		}
+
+		var llmData []map[string]interface{}
+		for _, wi := range workItems {
+			llmData = append(llmData, extractLLMWorkItemData(&wi))
+		}
+
+		fetchCommentsForItems(client, project, llmData)
+		fetchAndInlineParents(client, project, llmData)
+
+		var assignedTo string
+		for _, item := range llmData {
+			if a, ok := item["assigned_to"].(string); ok && a != "" {
+				assignedTo = a
+				break
+			}
+		}
+
+		totals := make(map[string]int)
+		oneWeekAgo := time.Now().AddDate(0, 0, -7)
+		closedThisWeek := 0
+		for _, item := range llmData {
+			state, _ := item["state"].(string)
+			if state != "" {
+				totals[state]++
+			}
+			if state == "Closed" {
+				continue
+			}
+			_ = oneWeekAgo
+			_ = closedThisWeek
+		}
+		totals["total"] = len(llmData)
+
+		grouped := groupByParent(llmData)
+
+		dashboard := map[string]interface{}{
+			"assigned_to": assignedTo,
+			"totals":      totals,
+			"by_parent":   grouped,
+		}
+
+		if format == "" {
+			format = FormatYAML
+		}
+
+		if format == FormatMarkdown {
+			printMarkdownDashboard(dashboard)
+			return nil
+		}
+
+		return printOutput(dashboard, format)
+	},
+}
+
 func init() {
 	workItemListCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	workItemListCmd.Flags().String("state", "", "Filter by state")
 	workItemListCmd.Flags().String("type", "", "Filter by work item type")
 	workItemListCmd.Flags().String("assigned-to", "", "Filter by assignee")
 	workItemListCmd.Flags().Bool("mine", false, "Filter by work items assigned to the authenticated user")
+	workItemListCmd.Flags().Bool("all-states", false, "Explicitly fetch all states (default behavior)")
 	workItemListCmd.Flags().Bool("full", false, "Show all fields (default: LLM-optimized view)")
-	workItemListCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml) - default: yaml")
+	workItemListCmd.Flags().Bool("with-details", false, "Fetch comments for each work item (batched)")
+	workItemListCmd.Flags().Bool("expand-parents", false, "Inline parent work item data with comments")
+	workItemListCmd.Flags().String("group-by", "", "Group results by field (parent)")
+	workItemListCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml/markdown) - default: yaml")
 
 	workItemGetCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	workItemGetCmd.Flags().Int("id", 0, "Work item ID (required)")
 	workItemGetCmd.Flags().Bool("full", false, "Show all fields (default: LLM-optimized view)")
-	workItemGetCmd.Flags().Bool("related-full", false, "Fetch and show QA Feedbacks and related work items with full details")
-	workItemGetCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml) - default: yaml")
+	workItemGetCmd.Flags().Bool("related-full", false, "Fetch and show parent, QA Feedbacks and related work items with full details")
+	workItemGetCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml/markdown) - default: yaml")
 
 	workItemCreateCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	workItemCreateCmd.Flags().String("title", "", "Work item title (required)")
 	workItemCreateCmd.Flags().String("type", "", "Work item type: Task, Bug, Feature (required)")
 	workItemCreateCmd.Flags().String("description", "", "Work item description")
 	workItemCreateCmd.Flags().String("assign-to", "", "Assignee")
-	workItemCreateCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml)")
+	workItemCreateCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml/markdown)")
 
 	workItemCommentCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	workItemCommentCmd.Flags().Int("id", 0, "Work item ID (required)")
 	workItemCommentCmd.Flags().String("text", "", "Comment text (required)")
-	workItemCommentCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml)")
+	workItemCommentCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml/markdown)")
 
 	workItemFieldCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	workItemFieldCmd.Flags().Int("id", 0, "Work item ID (required)")
 	workItemFieldCmd.Flags().String("field", "", "Field name (required)")
 	workItemFieldCmd.Flags().String("value", "", "New value (required)")
-	workItemFieldCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml)")
+	workItemFieldCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml/markdown)")
 
 	workItemStateCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	workItemStateCmd.Flags().Int("id", 0, "Work item ID (required)")
 	workItemStateCmd.Flags().String("state", "", "New state (required)")
 	workItemStateCmd.Flags().String("reason", "", "Reason for state change")
-	workItemStateCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml)")
+	workItemStateCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml/markdown)")
 
 	workItemUpdateCmd.Flags().StringP("profile", "p", "", "Azure DevOps profile to use")
 	workItemUpdateCmd.Flags().Int("id", 0, "Work item ID (required)")
 	workItemUpdateCmd.Flags().String("field", "", "Field name (required)")
 	workItemUpdateCmd.Flags().String("value", "", "New value (required)")
-	workItemUpdateCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml)")
+	workItemUpdateCmd.Flags().VarP(&format, "format", "f", "Output format (table/json/yaml/markdown)")
 
 	workItemCmd.AddCommand(workItemListCmd)
 	workItemCmd.AddCommand(workItemGetCmd)
@@ -578,6 +1128,7 @@ func init() {
 	workItemCmd.AddCommand(workItemFieldCmd)
 	workItemCmd.AddCommand(workItemStateCmd)
 	workItemCmd.AddCommand(workItemUpdateCmd)
+	workItemCmd.AddCommand(dashboardCmd)
 }
 
 func init() {

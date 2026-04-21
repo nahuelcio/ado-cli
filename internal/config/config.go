@@ -190,8 +190,20 @@ func (c *ConfigLoader) Save() error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(c.configPath, data, 0o600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+	var test Config
+	if err := yaml.Unmarshal(data, &test); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
+	tmpFile := c.configPath + ".tmp"
+	if err := os.WriteFile(tmpFile, data, 0o600); err != nil {
+		return fmt.Errorf("failed to write temp config file: %w", err)
+	}
+
+	os.Remove(c.configPath)
+	if err := os.Rename(tmpFile, c.configPath); err != nil {
+		os.Remove(tmpFile)
+		return fmt.Errorf("failed to rename temp config file: %w", err)
 	}
 
 	return nil

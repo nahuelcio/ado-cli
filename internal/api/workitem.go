@@ -354,7 +354,7 @@ func (c *workItemClient) GetWorkItemsBatch(ctx context.Context, project string, 
 		return []WorkItem{}, nil
 	}
 
-	url := fmt.Sprintf("%s/%s/_apis/wit/workitemsbatch?api-version=7.1", c.client.Config.BaseURL, project)
+	url := fmt.Sprintf("%s/%s/_apis/wit/workitemsbatch?api-version=7.1&$expand=Relations", c.client.Config.BaseURL, project)
 	workItems := make([]WorkItem, 0, len(ids))
 
 	for start := 0; start < len(ids); start += maxWorkItemsBatchSize {
@@ -364,8 +364,11 @@ func (c *workItemClient) GetWorkItemsBatch(ctx context.Context, project string, 
 		}
 
 		batchRequest := map[string]interface{}{
-			"ids":    ids[start:end],
-			"fields": []string{"System.Id", "System.Title", "System.State", "System.AssignedTo", "System.WorkItemType"},
+			"ids": ids[start:end],
+			"fields": []string{
+				"System.Id", "System.Title", "System.State", "System.AssignedTo",
+				"System.WorkItemType", "System.Description", "System.CommentCount",
+			},
 		}
 
 		resp, err := c.client.doRequest(ctx, http.MethodPost, url, batchRequest)
