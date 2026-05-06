@@ -24,7 +24,10 @@ describe("package metadata", () => {
   it("provides a non-interactive sync command for existing profiles", () => {
     expect(cliSource).toContain("function syncExistingConfig");
     expect(cliSource).toContain("npx @nahuelcio/opencode-ado sync");
+    expect(cliSource).toContain('command === "sync-local"');
+    expect(cliSource).toContain("getLocalPluginSpec");
     expect(cliSource).toContain('command === "sync"');
+    expect(pkg.scripts["sync:local"]).toContain("sync-local");
   });
 
   it("pins OpenCode config to the running package version to avoid stale latest cache", () => {
@@ -35,15 +38,15 @@ describe("package metadata", () => {
 
   it("renders sidebar state reactively after PR loading completes", () => {
     expect(tuiSource).toContain("function SidebarContentView");
-    expect(tuiSource).toContain("<SidebarContentView api={api} options={options} />");
+    expect(tuiSource).toContain("<SidebarContentView api={api} data={data} />");
     expect(tuiSource).toContain("Switch");
     expect(tuiSource).toContain("Match");
     expect(tuiSource).not.toContain('if (d().status === "loading") return');
   });
 
   it("stringifies numeric values before rendering them inside text nodes", () => {
-    expect(tuiSource).toContain("String(data().pendingReviews.length)");
-    expect(tuiSource).toContain("String(data().myPRs.length)");
+    expect(tuiSource).toContain("String(props.data().pendingReviews.length)");
+    expect(tuiSource).toContain("String(props.data().myPRs.length)");
     expect(tuiSource).toContain("String(pr.id)");
     expect(tuiSource).toContain('<span style={{ fg: "gray" }}>{pr.author} — {pr.title}</span>');
     expect(tuiSource).toContain('{pr.isDraft ? <span style={{ fg: "gray" }}> [DRAFT]</span> : ""}');
@@ -53,6 +56,14 @@ describe("package metadata", () => {
   it("uses preview connectionData API and request timeout to avoid infinite loading", () => {
     expect(tuiSource).toContain('CONNECTION_DATA_API_VERSION = "7.1-preview.1"');
     expect(tuiSource).toContain("REQUEST_TIMEOUT_MS");
+    expect(tuiSource).toContain("SIDEBAR_LOAD_TIMEOUT_MS");
+    expect(tuiSource).toContain("Sidebar load timed out");
     expect(tuiSource).toContain("AbortController");
+  });
+
+  it("keeps sidebar state at plugin scope so slot rerenders do not reset loading", () => {
+    expect(tuiSource).toContain("api.lifecycle.onDispose");
+    expect(tuiSource).toContain("let inFlight: Promise<void> | undefined");
+    expect(tuiSource).toContain("const [data, setData] = createSignal<SidebarData>");
   });
 });

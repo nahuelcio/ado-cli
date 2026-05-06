@@ -12,7 +12,7 @@
  */
 
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
-import { createSignal, Match, onCleanup, Switch } from "solid-js";
+import { createSignal, Match, Switch } from "solid-js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -61,6 +61,7 @@ interface PRSummary {
 const API_VERSION = "7.1";
 const CONNECTION_DATA_API_VERSION = "7.1-preview.1";
 const REQUEST_TIMEOUT_MS = 10_000;
+const SIDEBAR_LOAD_TIMEOUT_MS = 15_000;
 
 function reviewerMatchesUser(reviewer: any, userId: string | undefined): boolean {
   if (!userId) return false;
@@ -170,6 +171,18 @@ async function fetchSidebarData(client: TuiPluginApi["client"], options?: unknow
   return { status: "ready", profileName: name, pendingReviews: pending, myPRs: mine };
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      const timer = setTimeout(() => {
+        clearTimeout(timer);
+        reject(new Error(message));
+      }, timeoutMs);
+    }),
+  ]);
+}
+
 // ─── Helper ───────────────────────────────────────────────────────────────
 
 function shortRef(ref: string | undefined): string {
@@ -177,68 +190,24 @@ function shortRef(ref: string | undefined): string {
   return ref.replace("refs/heads/", "").replace("refs/tags/", "");
 }
 
-function SidebarContentView(props: { api: TuiPluginApi; options?: unknown }) {
-  // ─── Reactive State ──────────────────────────────────────
-  const [data, setData] = createSignal<SidebarData>({
-    status: "loading",
-    profileName: "",
-    pendingReviews: [],
-    myPRs: [],
-  });
-
-  let disposed = false;
-  const refresh = async () => {
-    if (disposed) return;
-    try {
-      const result = await fetchSidebarData(props.api.client, props.options);
-      if (!disposed) setData(result);
-    } catch (err) {
-      if (!disposed) setData({
-        status: "error",
-        profileName: "",
-        pendingReviews: [],
-        myPRs: [],
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
-
-  // Initial load
-  refresh();
-
-  // Polling every 60s
-  const interval = setInterval(refresh, 60_000);
-  const unsubEvent = props.api.event.on("session.updated", () => {
-    setTimeout(refresh, 150);
-  });
-  const unsubMsg = props.api.event.on("message.updated", () => {
-    setTimeout(refresh, 150);
-  });
-
-  onCleanup(() => {
-    disposed = true;
-    clearInterval(interval);
-    unsubEvent();
-    unsubMsg();
-  });
-
+function SidebarContentView(props: { api: TuiPluginApi; data: () => SidebarData }) {
   return (
     <Switch>
-      <Match when={data().status === "loading"}>
+      <Match when={props.data().status === "loading"}>
         <text fg="gray">Loading PRs...</text>
       </Match>
-      <Match when={data().status === "error"}>
-        <text fg="red">ADO: {data().error ?? "Unknown error"}</text>
+      <Match when={props.data().status === "error"}>
+        <text fg="red">ADO: {props.data().error ?? "Unknown error"}</text>
       </Match>
-      <Match when={data().status === "ready"}>
+      <Match when={props.data().status === "ready"}>
         <box gap={0}>
           <text fg={props.api.theme.current.text}>
-            <b>Azure DevOps ({data().profileName})</b>
+            <b>Azure DevOps ({props.data().profileName})</b>
           </text>
-          {data().pendingReviews.length > 0 && (
+          {props.data().pendingReviews.length > 0 && (
             <box gap={0}>
-              <text fg="yellow">Pending Review ({String(data().pendingReviews.length)})</text>
-              {data().pendingReviews.map((pr) => (
+              <text fg="yellow">Pending Review ({String(props.data().pendingReviews.length)})</text>
+              {props.data().pendingReviews.map((pr) => (
                 <text wrapMode="none">
                   {`  #${String(pr.id)} ${pr.repo}/${shortRef(pr.source)} → ${shortRef(pr.target)}  `}
                   <span style={{ fg: "gray" }}>{pr.author} — {pr.title}</span>
@@ -246,10 +215,10 @@ function SidebarContentView(props: { api: TuiPluginApi; options?: unknown }) {
               ))}
             </box>
           )}
-          {data().myPRs.length > 0 && (
+          {props.data().myPRs.length > 0 && (
             <box gap={0}>
-              <text fg="green">Your PRs ({String(data().myPRs.length)})</text>
-              {data().myPRs.map((pr) => (
+              <text fg="green">Your PRs ({String(props.data().myPRs.length)})</text>
+              {props.data().myPRs.map((pr) => (
                 <text wrapMode="none">
                   {`  #${String(pr.id)} ${pr.repo}/${shortRef(pr.source)} → ${shortRef(pr.target)}`}
                   {pr.isDraft ? <span style={{ fg: "gray" }}> [DRAFT]</span> : ""}
@@ -258,7 +227,7 @@ function SidebarContentView(props: { api: TuiPluginApi; options?: unknown }) {
               ))}
             </box>
           )}
-          {data().pendingReviews.length === 0 && data().myPRs.length === 0 && (
+          {props.data().pendingReviews.length === 0 && props.data().myPRs.length === 0 && (
             <text fg="gray">No active PRs</text>
           )}
         </box>
@@ -270,11 +239,71 @@ function SidebarContentView(props: { api: TuiPluginApi; options?: unknown }) {
 // ─── TUI Plugin Export ────────────────────────────────────────────────────
 
 export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
+  const [data, setData] = createSignal<SidebarData>({
+    status: "loading",
+    profileName: "",
+    pendingReviews: [],
+    myPRs: [],
+  });
+
+  let disposed = false;
+  let inFlight: Promise<void> | undefined;
+
+  const refresh = async () => {
+    if (disposed || inFlight) return inFlight;
+
+    inFlight = (async () => {
+      try {
+        const result = await withTimeout(
+          fetchSidebarData(api.client, options),
+          SIDEBAR_LOAD_TIMEOUT_MS,
+          "Sidebar load timed out",
+        );
+        if (!disposed) setData(result);
+      } catch (err) {
+        if (!disposed) setData({
+          status: "error",
+          profileName: "",
+          pendingReviews: [],
+          myPRs: [],
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        inFlight = undefined;
+      }
+    })();
+
+    return inFlight;
+  };
+
+  void refresh();
+
+  const interval = setInterval(() => {
+    void refresh();
+  }, 60_000);
+  const unsubEvent = api.event.on("session.updated", () => {
+    setTimeout(() => {
+      void refresh();
+    }, 150);
+  });
+  const unsubMsg = api.event.on("message.updated", () => {
+    setTimeout(() => {
+      void refresh();
+    }, 150);
+  });
+
+  api.lifecycle.onDispose(() => {
+    disposed = true;
+    clearInterval(interval);
+    unsubEvent();
+    unsubMsg();
+  });
+
   api.slots.register({
     order: 200,
     slots: {
       sidebar_content() {
-        return <SidebarContentView api={api} options={options} />;
+        return <SidebarContentView api={api} data={data} />;
       },
     },
   });

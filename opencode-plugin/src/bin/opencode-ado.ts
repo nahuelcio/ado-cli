@@ -6,6 +6,7 @@
  * Usage:
  *   npx @nahuelcio/opencode-ado init    — Interactive setup wizard
  *   npx @nahuelcio/opencode-ado sync    — Register existing config in OpenCode + TUI
+ *   node dist/bin/opencode-ado.js sync-local — Register the local workspace build without publishing
  *   npx @nahuelcio/opencode-ado show    — Show current config
  *   npx @nahuelcio/opencode-ado --help
  */
@@ -209,8 +210,22 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function isLocalAdoPluginSpec(spec: unknown): boolean {
+  if (typeof spec !== "string" || !spec.startsWith("file:")) return false;
+  try {
+    const packageRoot = spec.slice("file:".length);
+    const packageJsonPath = join(packageRoot, "package.json");
+    if (!existsSync(packageJsonPath)) return false;
+    const pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as { name?: string };
+    return pkg.name === PLUGIN_SPEC;
+  } catch {
+    return false;
+  }
+}
+
 function isAdoPluginSpec(spec: unknown): boolean {
-  return typeof spec === "string" && (spec === PLUGIN_SPEC || spec.startsWith(`${PLUGIN_SPEC}@`));
+  return typeof spec === "string"
+    && (spec === PLUGIN_SPEC || spec.startsWith(`${PLUGIN_SPEC}@`) || isLocalAdoPluginSpec(spec));
 }
 
 function getPackageVersion(): string | undefined {
@@ -233,6 +248,12 @@ function getVersionedPluginSpec(): string {
   return version ? `${PLUGIN_SPEC}@${version}` : PLUGIN_SPEC;
 }
 
+function getLocalPluginSpec(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const packageRoot = realpathSync(join(here, "..", ".."));
+  return `file:${packageRoot.replace(/\\/g, "/")}`;
+}
+
 function pluginMatches(entry: unknown): boolean {
   if (isAdoPluginSpec(entry)) return true;
   if (Array.isArray(entry)) return isAdoPluginSpec(entry[0]);
@@ -248,8 +269,12 @@ function getPluginAdoConfig(plugins: unknown[]): Record<string, unknown> | undef
   return nested ?? options;
 }
 
-function upsertPluginConfig(plugins: unknown[], adoConfig: Record<string, unknown>): void {
-  const entry = [getVersionedPluginSpec(), adoConfig];
+function upsertPluginConfig(
+  plugins: unknown[],
+  adoConfig: Record<string, unknown>,
+  pluginSpec = getVersionedPluginSpec(),
+): void {
+  const entry = [pluginSpec, adoConfig];
   const index = plugins.findIndex(pluginMatches);
   if (index >= 0) plugins[index] = entry;
   else plugins.push(entry);
@@ -259,12 +284,12 @@ function readTuiConfig(path: string): Record<string, unknown> {
   return existsSync(path) ? readConfig(path) : {};
 }
 
-function syncTuiPluginConfig(configDir: string, adoConfig: Record<string, unknown>): string {
+function syncTuiPluginConfig(configDir: string, adoConfig: Record<string, unknown>, pluginSpec = getVersionedPluginSpec()): string {
   const tuiPath = findTuiConfigFile(configDir);
   const tuiConfig = readTuiConfig(tuiPath);
   if (!Array.isArray(tuiConfig["plugin"])) tuiConfig["plugin"] = [];
   const tuiPlugins = tuiConfig["plugin"] as unknown[];
-  upsertPluginConfig(tuiPlugins, adoConfig);
+  upsertPluginConfig(tuiPlugins, adoConfig, pluginSpec);
   writeTuiConfig(tuiPath, tuiConfig);
   return tuiPath;
 }
@@ -284,7 +309,7 @@ function normalizeAdoConfig(ado: Record<string, unknown>): Record<string, unknow
   return ado;
 }
 
-function syncExistingConfig(): { configPath: string; tuiPath: string } {
+function syncExistingConfig(pluginSpec = getVersionedPluginSpec()): { configPath: string; tuiPath: string; pluginSpec: string } {
   const configDir = getOpenCodeConfigDir();
   const configPath = findConfigFile(configDir) ?? join(configDir, "opencode.json");
   const tuiPath = findTuiConfigFile(configDir);
@@ -296,12 +321,12 @@ function syncExistingConfig(): { configPath: string; tuiPath: string } {
   if (!Array.isArray(config["plugin"])) config["plugin"] = [];
   const plugins = config["plugin"] as unknown[];
   delete config["ado"];
-  upsertPluginConfig(plugins, ado);
+  upsertPluginConfig(plugins, ado, pluginSpec);
 
-  const writtenTuiPath = syncTuiPluginConfig(configDir, ado);
+  const writtenTuiPath = syncTuiPluginConfig(configDir, ado, pluginSpec);
   writeConfig(configPath, config);
 
-  return { configPath, tuiPath: writtenTuiPath };
+  return { configPath, tuiPath: writtenTuiPath, pluginSpec };
 }
 
 async function runInit(_cwd: string): Promise<number> {
@@ -510,12 +535,31 @@ async function runShow(): Promise<number> {
 
 async function runSync(): Promise<number> {
   try {
-    const { configPath, tuiPath } = syncExistingConfig();
+    const { configPath, tuiPath, pluginSpec } = syncExistingConfig();
     console.log();
     console.log(`  ${green("✓")} Server plugin registered in ${configPath}`);
     console.log(`  ${green("✓")} TUI sidebar plugin registered in ${tuiPath}`);
+    console.log(`  ${green("✓")} Plugin spec: ${pluginSpec}`);
     console.log();
     console.log("  Restart OpenCode to reload plugins.");
+    console.log();
+    return 0;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(yellow(`  ${message}`));
+    return 1;
+  }
+}
+
+async function runSyncLocal(): Promise<number> {
+  try {
+    const { configPath, tuiPath, pluginSpec } = syncExistingConfig(getLocalPluginSpec());
+    console.log();
+    console.log(`  ${green("✓")} Server plugin registered in ${configPath}`);
+    console.log(`  ${green("✓")} TUI sidebar plugin registered in ${tuiPath}`);
+    console.log(`  ${green("✓")} Local plugin spec: ${pluginSpec}`);
+    console.log();
+    console.log("  Restart OpenCode to load the local workspace build.");
     console.log();
     return 0;
   } catch (err) {
@@ -535,6 +579,7 @@ const USAGE = [
   "  Usage:",
   `    ${cyan("npx @nahuelcio/opencode-ado init")}    Interactive setup wizard`,
   `    ${cyan("npx @nahuelcio/opencode-ado sync")}    Register existing config in OpenCode + TUI`,
+  `    ${cyan("node dist/bin/opencode-ado.js sync-local")}  Register local workspace build without publishing`,
   `    ${cyan("npx @nahuelcio/opencode-ado show")}    Show current config`,
   `    ${cyan("npx @nahuelcio/opencode-ado --help")}  Show this help`,
   "",
@@ -548,6 +593,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
   if (command === "init") return runInit(process.cwd());
   if (command === "sync" || command === "repair" || command === "install") return runSync();
+  if (command === "sync-local") return runSyncLocal();
   if (command === "show") return runShow();
   console.log(`Unknown command: ${command}`);
   console.log(USAGE);

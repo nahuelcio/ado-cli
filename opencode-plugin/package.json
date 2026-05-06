@@ -30,6 +30,7 @@
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
+    "sync:local": "npm run build && node dist/bin/opencode-ado.js sync-local",
     "test": "vitest run",
     "test:watch": "vitest"
   },
