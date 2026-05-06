@@ -5,6 +5,7 @@
  *
  * Usage:
  *   npx @nahuelcio/opencode-ado init    — Interactive setup wizard
+ *   npx @nahuelcio/opencode-ado sync    — Register existing config in OpenCode + TUI
  *   npx @nahuelcio/opencode-ado show    — Show current config
  *   npx @nahuelcio/opencode-ado --help
  */
@@ -17,6 +18,7 @@ import { createInterface } from "node:readline";
 
 const PLUGIN_SPEC = "@nahuelcio/opencode-ado";
 const SCHEMA_URL = "https://opencode.ai/config.json";
+const TUI_SCHEMA_URL = "https://opencode.ai/tui.json";
 
 // ─── Colors ───────────────────────────────────────────────────────────────
 
@@ -89,6 +91,10 @@ function findConfigFile(dir: string): string | null {
   return null;
 }
 
+function findTuiConfigFile(dir: string): string {
+  return join(dir, "tui.json");
+}
+
 function readConfig(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
   const raw = readFileSync(path, "utf-8");
@@ -154,6 +160,13 @@ function writeConfig(path: string, data: Record<string, unknown>): void {
   writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
+function writeTuiConfig(path: string, data: Record<string, unknown>): void {
+  const dir = dirname(path);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!data["$schema"]) data["$schema"] = TUI_SCHEMA_URL;
+  writeFileSync(path, JSON.stringify(data, null, 2) + "\n", "utf-8");
+}
+
 // ─── PAT storage ──────────────────────────────────────────────────────────
 
 function storePAT(pat: string): void {
@@ -216,6 +229,55 @@ function upsertPluginConfig(plugins: unknown[], adoConfig: Record<string, unknow
   const index = plugins.findIndex(pluginMatches);
   if (index >= 0) plugins[index] = entry;
   else plugins.push(entry);
+}
+
+function readTuiConfig(path: string): Record<string, unknown> {
+  return existsSync(path) ? readConfig(path) : {};
+}
+
+function syncTuiPluginConfig(configDir: string, adoConfig: Record<string, unknown>): string {
+  const tuiPath = findTuiConfigFile(configDir);
+  const tuiConfig = readTuiConfig(tuiPath);
+  if (!Array.isArray(tuiConfig["plugin"])) tuiConfig["plugin"] = [];
+  const tuiPlugins = tuiConfig["plugin"] as unknown[];
+  upsertPluginConfig(tuiPlugins, adoConfig);
+  writeTuiConfig(tuiPath, tuiConfig);
+  return tuiPath;
+}
+
+function findExistingAdoConfig(config: Record<string, unknown>, tuiConfig?: Record<string, unknown>) {
+  const plugins = Array.isArray(config["plugin"]) ? config["plugin"] as unknown[] : [];
+  const tuiPlugins = Array.isArray(tuiConfig?.["plugin"]) ? tuiConfig?.["plugin"] as unknown[] : [];
+  return getPluginAdoConfig(plugins)
+    ?? asRecord(config["ado"])
+    ?? getPluginAdoConfig(tuiPlugins);
+}
+
+function normalizeAdoConfig(ado: Record<string, unknown>): Record<string, unknown> {
+  if (!ado["profiles"] || typeof ado["profiles"] !== "object") {
+    throw new Error("No ADO profiles found. Run `npx @nahuelcio/opencode-ado init` first.");
+  }
+  return ado;
+}
+
+function syncExistingConfig(): { configPath: string; tuiPath: string } {
+  const configDir = getOpenCodeConfigDir();
+  const configPath = findConfigFile(configDir) ?? join(configDir, "opencode.json");
+  const tuiPath = findTuiConfigFile(configDir);
+  const config = readConfig(configPath);
+  const tuiConfig = readTuiConfig(tuiPath);
+
+  const ado = normalizeAdoConfig(findExistingAdoConfig(config, tuiConfig) ?? {});
+
+  if (!Array.isArray(config["plugin"])) config["plugin"] = [];
+  const plugins = config["plugin"] as unknown[];
+  delete config["ado"];
+  upsertPluginConfig(plugins, ado);
+
+  const writtenTuiPath = syncTuiPluginConfig(configDir, ado);
+  writeConfig(configPath, config);
+
+  return { configPath, tuiPath: writtenTuiPath };
 }
 
 async function runInit(_cwd: string): Promise<number> {
@@ -350,11 +412,14 @@ async function runInit(_cwd: string): Promise<number> {
   if (defaultProfileName) ado["defaultProfile"] = defaultProfileName;
   delete config["ado"];
   upsertPluginConfig(plugins, ado);
+  const tuiPath = syncTuiPluginConfig(configDir, ado);
 
   writeConfig(configPath, config);
   console.log();
-  console.log(`  ${green("✓")} Plugin added to config`);
+  console.log(`  ${green("✓")} Server plugin added to config`);
+  console.log(`  ${green("✓")} TUI sidebar plugin added to tui.json`);
   console.log(`  ${green("✓")} Wrote ${configPath}`);
+  console.log(`  ${green("✓")} Wrote ${tuiPath}`);
 
   // ── Step 6: Next steps ────────────────────────────────────────────
   console.log();
@@ -417,6 +482,25 @@ async function runShow(): Promise<number> {
   return 0;
 }
 
+// ─── Sync Command ─────────────────────────────────────────────────────────
+
+async function runSync(): Promise<number> {
+  try {
+    const { configPath, tuiPath } = syncExistingConfig();
+    console.log();
+    console.log(`  ${green("✓")} Server plugin registered in ${configPath}`);
+    console.log(`  ${green("✓")} TUI sidebar plugin registered in ${tuiPath}`);
+    console.log();
+    console.log("  Restart OpenCode to reload plugins.");
+    console.log();
+    return 0;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(yellow(`  ${message}`));
+    return 1;
+  }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────
 
 const USAGE = [
@@ -426,6 +510,7 @@ const USAGE = [
   "",
   "  Usage:",
   `    ${cyan("npx @nahuelcio/opencode-ado init")}    Interactive setup wizard`,
+  `    ${cyan("npx @nahuelcio/opencode-ado sync")}    Register existing config in OpenCode + TUI`,
   `    ${cyan("npx @nahuelcio/opencode-ado show")}    Show current config`,
   `    ${cyan("npx @nahuelcio/opencode-ado --help")}  Show this help`,
   "",
@@ -438,6 +523,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 0;
   }
   if (command === "init") return runInit(process.cwd());
+  if (command === "sync" || command === "repair" || command === "install") return runSync();
   if (command === "show") return runShow();
   console.log(`Unknown command: ${command}`);
   console.log(USAGE);

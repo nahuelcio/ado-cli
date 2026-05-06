@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 describe("package metadata", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
+  const cliSource = readFileSync(new URL("../src/bin/opencode-ado.ts", import.meta.url), "utf-8");
 
   it("publishes the TUI source expected by OpenCode", () => {
     expect(pkg.exports["./tui"].default).toBe("./dist/tui.tsx");
@@ -11,5 +12,17 @@ describe("package metadata", () => {
 
   it("build copies the TUI TSX file into dist", () => {
     expect(pkg.scripts.build).toContain("scripts/prepare-tui-dist.mjs");
+  });
+
+  it("init registers both server and TUI plugin configs", () => {
+    expect(cliSource).toContain("syncTuiPluginConfig");
+    expect(cliSource).toContain("tui.json");
+    expect(cliSource).toContain("TUI sidebar plugin added to tui.json");
+  });
+
+  it("provides a non-interactive sync command for existing profiles", () => {
+    expect(cliSource).toContain("function syncExistingConfig");
+    expect(cliSource).toContain("npx @nahuelcio/opencode-ado sync");
+    expect(cliSource).toContain('command === "sync"');
   });
 });
