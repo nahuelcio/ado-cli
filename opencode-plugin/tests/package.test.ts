@@ -25,4 +25,10 @@ describe("package metadata", () => {
     expect(cliSource).toContain("npx @nahuelcio/opencode-ado sync");
     expect(cliSource).toContain('command === "sync"');
   });
+
+  it("pins OpenCode config to the running package version to avoid stale latest cache", () => {
+    expect(cliSource).toContain("getVersionedPluginSpec");
+    expect(cliSource).toContain("pkg.version");
+    expect(cliSource).toContain("startsWith(`${PLUGIN_SPEC}@`)");
+  });
 });

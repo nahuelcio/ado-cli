@@ -209,9 +209,33 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function isAdoPluginSpec(spec: unknown): boolean {
+  return typeof spec === "string" && (spec === PLUGIN_SPEC || spec.startsWith(`${PLUGIN_SPEC}@`));
+}
+
+function getPackageVersion(): string | undefined {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    for (const path of [
+      join(here, "..", "..", "package.json"),
+      join(here, "..", "package.json"),
+    ]) {
+      if (!existsSync(path)) continue;
+      const pkg = JSON.parse(readFileSync(path, "utf-8")) as { version?: string };
+      if (pkg.version) return pkg.version;
+    }
+  } catch { /* ignore */ }
+  return undefined;
+}
+
+function getVersionedPluginSpec(): string {
+  const version = getPackageVersion();
+  return version ? `${PLUGIN_SPEC}@${version}` : PLUGIN_SPEC;
+}
+
 function pluginMatches(entry: unknown): boolean {
-  if (typeof entry === "string") return entry === PLUGIN_SPEC || entry.startsWith(PLUGIN_SPEC + "@");
-  if (Array.isArray(entry)) return entry[0] === PLUGIN_SPEC;
+  if (isAdoPluginSpec(entry)) return true;
+  if (Array.isArray(entry)) return isAdoPluginSpec(entry[0]);
   return false;
 }
 
@@ -225,7 +249,7 @@ function getPluginAdoConfig(plugins: unknown[]): Record<string, unknown> | undef
 }
 
 function upsertPluginConfig(plugins: unknown[], adoConfig: Record<string, unknown>): void {
-  const entry = [PLUGIN_SPEC, adoConfig];
+  const entry = [getVersionedPluginSpec(), adoConfig];
   const index = plugins.findIndex(pluginMatches);
   if (index >= 0) plugins[index] = entry;
   else plugins.push(entry);
