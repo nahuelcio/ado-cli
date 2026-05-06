@@ -58,6 +58,10 @@ interface PRSummary {
   isDraft: boolean;
 }
 
+const API_VERSION = "7.1";
+const CONNECTION_DATA_API_VERSION = "7.1-preview.1";
+const REQUEST_TIMEOUT_MS = 10_000;
+
 function reviewerMatchesUser(reviewer: any, userId: string | undefined): boolean {
   if (!userId) return false;
   return reviewer?.id === userId
@@ -112,20 +116,32 @@ async function fetchSidebarData(client: TuiPluginApi["client"], options?: unknow
   const orgUrl = resolveOrgUrl(profile.org);
   const authHeader = "Basic " + Buffer.from(":" + pat).toString("base64");
 
-  const doReq = async (endpoint: string, scope: "org" | "project" = "project") => {
+  const doReq = async (
+    endpoint: string,
+    scope: "org" | "project" = "project",
+    apiVersion = API_VERSION,
+  ) => {
     const root = scope === "org" ? orgUrl : `${orgUrl}/${encodeURIComponent(profile.project)}`;
     const apiPath = endpoint.startsWith("/_apis/")
       ? endpoint
       : `/_apis${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
     const url = new URL(root + apiPath);
-    url.searchParams.set("api-version", "7.1");
-    const res = await fetch(url, { headers: { Authorization: authHeader, Accept: "application/json" } });
-    if (!res.ok) throw new Error(`ADO ${res.status}`);
+    url.searchParams.set("api-version", apiVersion);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const res = await fetch(url, {
+      headers: { Authorization: authHeader, Accept: "application/json" },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`ADO ${res.status}: ${body.slice(0, 120)}`);
+    }
     return res.json() as Promise<{ value: any[] }>;
   };
 
   // Get user identity
-  const connData = await doReq("/connectionData", "org") as any;
+  const connData = await doReq("/connectionData", "org", CONNECTION_DATA_API_VERSION) as any;
   const userId: string | undefined = connData?.authenticatedUser?.id;
 
   const pending: PRSummary[] = [];
@@ -161,6 +177,96 @@ function shortRef(ref: string | undefined): string {
   return ref.replace("refs/heads/", "").replace("refs/tags/", "");
 }
 
+function SidebarContentView(props: { api: TuiPluginApi; options?: unknown }) {
+  // ─── Reactive State ──────────────────────────────────────
+  const [data, setData] = createSignal<SidebarData>({
+    status: "loading",
+    profileName: "",
+    pendingReviews: [],
+    myPRs: [],
+  });
+
+  let disposed = false;
+  const refresh = async () => {
+    if (disposed) return;
+    try {
+      const result = await fetchSidebarData(props.api.client, props.options);
+      if (!disposed) setData(result);
+    } catch (err) {
+      if (!disposed) setData({
+        status: "error",
+        profileName: "",
+        pendingReviews: [],
+        myPRs: [],
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  // Initial load
+  refresh();
+
+  // Polling every 60s
+  const interval = setInterval(refresh, 60_000);
+  const unsubEvent = props.api.event.on("session.updated", () => {
+    setTimeout(refresh, 150);
+  });
+  const unsubMsg = props.api.event.on("message.updated", () => {
+    setTimeout(refresh, 150);
+  });
+
+  onCleanup(() => {
+    disposed = true;
+    clearInterval(interval);
+    unsubEvent();
+    unsubMsg();
+  });
+
+  return (
+    <Switch>
+      <Match when={data().status === "loading"}>
+        <text fg="gray">Loading PRs...</text>
+      </Match>
+      <Match when={data().status === "error"}>
+        <text fg="red">ADO: {data().error ?? "Unknown error"}</text>
+      </Match>
+      <Match when={data().status === "ready"}>
+        <box gap={0}>
+          <text fg={props.api.theme.current.text}>
+            <b>Azure DevOps ({data().profileName})</b>
+          </text>
+          {data().pendingReviews.length > 0 && (
+            <box gap={0}>
+              <text fg="yellow">Pending Review ({String(data().pendingReviews.length)})</text>
+              {data().pendingReviews.map((pr) => (
+                <text wrapMode="none">
+                  {`  #${String(pr.id)} ${pr.repo}/${shortRef(pr.source)} → ${shortRef(pr.target)}  `}
+                  <span style={{ fg: "gray" }}>{pr.author} — {pr.title}</span>
+                </text>
+              ))}
+            </box>
+          )}
+          {data().myPRs.length > 0 && (
+            <box gap={0}>
+              <text fg="green">Your PRs ({String(data().myPRs.length)})</text>
+              {data().myPRs.map((pr) => (
+                <text wrapMode="none">
+                  {`  #${String(pr.id)} ${pr.repo}/${shortRef(pr.source)} → ${shortRef(pr.target)}`}
+                  {pr.isDraft ? <span style={{ fg: "gray" }}> [DRAFT]</span> : ""}
+                  {"  "}<span style={{ fg: "gray" }}>{pr.title}</span>
+                </text>
+              ))}
+            </box>
+          )}
+          {data().pendingReviews.length === 0 && data().myPRs.length === 0 && (
+            <text fg="gray">No active PRs</text>
+          )}
+        </box>
+      </Match>
+    </Switch>
+  );
+}
+
 // ─── TUI Plugin Export ────────────────────────────────────────────────────
 
 export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
@@ -168,93 +274,7 @@ export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
     order: 200,
     slots: {
       sidebar_content() {
-        // ─── Reactive State ──────────────────────────────────────
-        const [data, setData] = createSignal<SidebarData>({
-          status: "loading",
-          profileName: "",
-          pendingReviews: [],
-          myPRs: [],
-        });
-
-        let disposed = false;
-        const refresh = async () => {
-          if (disposed) return;
-          try {
-            const result = await fetchSidebarData(api.client, options);
-            if (!disposed) setData(result);
-          } catch (err) {
-            if (!disposed) setData({
-              status: "error",
-              profileName: "",
-              pendingReviews: [],
-              myPRs: [],
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        };
-
-        // Initial load
-        refresh();
-
-        // Polling every 60s
-        const interval = setInterval(refresh, 60_000);
-        const unsubEvent = api.event.on("session.updated", () => {
-          setTimeout(refresh, 150);
-        });
-        const unsubMsg = api.event.on("message.updated", () => {
-          setTimeout(refresh, 150);
-        });
-
-        onCleanup(() => {
-          disposed = true;
-          clearInterval(interval);
-          unsubEvent();
-          unsubMsg();
-        });
-
-        return (
-          <Switch>
-            <Match when={data().status === "loading"}>
-              <text fg="gray">Loading PRs...</text>
-            </Match>
-            <Match when={data().status === "error"}>
-              <text fg="red">ADO: {data().error ?? "Unknown error"}</text>
-            </Match>
-            <Match when={data().status === "ready"}>
-              <box gap={0}>
-                <text fg={api.theme.current.text}>
-                  <b>Azure DevOps ({data().profileName})</b>
-                </text>
-                {data().pendingReviews.length > 0 && (
-                  <box gap={0}>
-                    <text fg="yellow">Pending Review ({data().pendingReviews.length})</text>
-                    {data().pendingReviews.map((pr) => (
-                      <text wrapMode="none">
-                        {"  "}#{pr.id} {pr.repo}/{shortRef(pr.source)} → {shortRef(pr.target)}{"  "}
-                        <text fg="gray">{pr.author} — {pr.title}</text>
-                      </text>
-                    ))}
-                  </box>
-                )}
-                {data().myPRs.length > 0 && (
-                  <box gap={0}>
-                    <text fg="green">Your PRs ({data().myPRs.length})</text>
-                    {data().myPRs.map((pr) => (
-                      <text wrapMode="none">
-                        {"  "}#{pr.id} {pr.repo}/{shortRef(pr.source)} → {shortRef(pr.target)}
-                        {pr.isDraft && <text fg="gray"> [DRAFT]</text>}
-                        {"  "}<text fg="gray">{pr.title}</text>
-                      </text>
-                    ))}
-                  </box>
-                )}
-                {data().pendingReviews.length === 0 && data().myPRs.length === 0 && (
-                  <text fg="gray">No active PRs</text>
-                )}
-              </box>
-            </Match>
-          </Switch>
-        );
+        return <SidebarContentView api={api} options={options} />;
       },
     },
   });
