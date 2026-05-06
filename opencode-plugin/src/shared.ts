@@ -32,6 +32,8 @@ export interface PRSummary {
   target: string;
   author: string;
   isDraft: boolean;
+  /** Vote status if the current user is a reviewer: 0=none, 10=approved, 5=suggestions, -5=waiting, -10=rejected. undefined if not a reviewer. */
+  myVote?: number;
 }
 
 // ─── Config helpers ───────────────────────────────────────────────────────

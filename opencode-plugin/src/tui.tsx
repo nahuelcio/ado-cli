@@ -48,7 +48,7 @@ interface SidebarData {
   profileName: string;
   profileCount: number;
   profileNames: string[];
-  pendingReviews: PRSummary[];
+  assignedToMe: PRSummary[];
   myPRs: PRSummary[];
   selectedPr: PRSummary | null;
   view: "list" | "detail";
@@ -100,7 +100,7 @@ async function fetchPRData(
       profileName: name,
       profileCount: count,
       profileNames: names,
-      pendingReviews: [],
+      assignedToMe: [],
       myPRs: [],
       error: `Set env var ${profile.patEnvVar} or run init`,
     };
@@ -137,8 +137,9 @@ async function fetchPRData(
   const connData = await doReq("/connectionData", "org", CONNECTION_DATA_API_VERSION) as any;
   const userId: string | undefined = connData?.authenticatedUser?.id;
 
-  const pending: PRSummary[] = [];
+  const assigned: PRSummary[] = [];
   const mine: PRSummary[] = [];
+  const seenIds = new Set<string>();
 
   for (const repo of profile.repos) {
     try {
@@ -146,6 +147,10 @@ async function fetchPRData(
         `/git/repositories/${encodeURIComponent(repo)}/pullrequests?searchCriteria.status=active`,
       );
       for (const pr of data.value) {
+        const key = `${repo}:${pr.pullRequestId}`;
+        if (seenIds.has(key)) continue;
+        seenIds.add(key);
+
         const summary: PRSummary = {
           id: pr.pullRequestId,
           title: pr.title,
@@ -154,10 +159,17 @@ async function fetchPRData(
           target: shortBranch(pr.targetRefName),
           author: pr.createdBy?.displayName ?? "?",
           isDraft: !!pr.isDraft,
+          myVote: undefined,
         };
+
         const myReview = pr.reviewers?.find((r: any) => reviewerMatchesUser(r, userId));
-        if (myReview && myReview.vote === 0) pending.push(summary);
-        if (pr.createdBy?.id === userId) mine.push(summary);
+        if (myReview) {
+          summary.myVote = myReview.vote ?? 0;
+          assigned.push(summary);
+        }
+        if (pr.createdBy?.id === userId) {
+          mine.push(summary);
+        }
       }
     } catch { /* skip repo */ }
   }
@@ -167,7 +179,7 @@ async function fetchPRData(
     profileName: name,
     profileCount: count,
     profileNames: names,
-    pendingReviews: pending,
+    assignedToMe: assigned,
     myPRs: mine,
   };
 }
@@ -188,14 +200,14 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
 
 /** Get all PRs in display order (pending first, then mine). */
 function allPrs(data: SidebarData): PRSummary[] {
-  return [...data.pendingReviews, ...data.myPRs];
+  return [...data.assignedToMe, ...data.myPRs];
 }
 
 /** Auto-select: try persisted, then first PR, or null if empty. */
 function resolveSelection(
   fetched: Omit<SidebarData, "selectedPr" | "view">,
 ): PRSummary | null {
-  const all = [...fetched.pendingReviews, ...fetched.myPRs];
+  const all = [...fetched.assignedToMe, ...fetched.myPRs];
   if (all.length === 0) return null;
 
   // 1. Try persisted selection
@@ -238,17 +250,20 @@ function SidebarContentView(props: {
               : ""}
           </text>
 
-          {/* Pending Reviews */}
-          {d().pendingReviews.length > 0 && (
+          {/* Assigned to Me */}
+          {d().assignedToMe.length > 0 && (
             <box gap={0}>
-              <text fg="yellow">{`Pending Review (${String(d().pendingReviews.length)})`}</text>
-              {d().pendingReviews.map((pr) => {
+              <text fg="yellow">{`Assigned to You (${String(d().assignedToMe.length)})`}</text>
+              {d().assignedToMe.map((pr) => {
                 const sel = d().selectedPr?.id === pr.id && d().selectedPr?.repo === pr.repo;
+                const voteIcon = pr.myVote === 10 ? "✓" : pr.myVote === -10 ? "✗" : pr.myVote === -5 ? "⏳" : pr.myVote === 5 ? "✓?" : "—";
+                const voteColor = pr.myVote === 10 ? "green" : pr.myVote === -10 ? "red" : pr.myVote === -5 ? "yellow" : "gray";
                 return (
                   <text wrapMode="none" fg={sel ? "cyan" : undefined}>
                     {sel ? "► " : "  "}
                     {`#${String(pr.id)} ${pr.repo}/${pr.source} → ${pr.target}`}
-                    {"  "}<span style={{ fg: "gray" }}>{`${pr.author} — ${pr.title}`}</span>
+                    {" "}<span style={{ fg: voteColor }}>{voteIcon}</span>
+                    {" "}<span style={{ fg: "gray" }}>{`${pr.author} — ${pr.title}`}</span>
                   </text>
                 );
               })}
@@ -274,7 +289,7 @@ function SidebarContentView(props: {
           )}
 
           {/* Empty state */}
-          {d().pendingReviews.length === 0 && d().myPRs.length === 0 && (
+          {d().assignedToMe.length === 0 && d().myPRs.length === 0 && (
             <text fg="gray">No active PRs</text>
           )}
 
@@ -356,12 +371,14 @@ function registerCommands(
             const currentKey = d.selectedPr ? `${d.selectedPr.repo}:${d.selectedPr.id}` : undefined;
             const options = prList.map((pr) => {
               const key = `${pr.repo}:${pr.id}`;
-              const isPending = d.pendingReviews.some((p) => p.id === pr.id && p.repo === pr.repo);
+              const isAssigned = d.assignedToMe.some((p) => p.id === pr.id && p.repo === pr.repo);
+              const voteIcon = pr.myVote === 10 ? "✓" : pr.myVote === -10 ? "✗" : pr.myVote === -5 ? "⏳" : pr.myVote === 5 ? "✓?" : "—";
               return {
                 title: `#${pr.id} ${pr.title}`,
                 value: key,
                 description: `${pr.repo}: ${pr.source} → ${pr.target} by ${pr.author}${pr.isDraft ? " [DRAFT]" : ""}`,
-                category: isPending ? "Pending Review" : "Your PRs",
+                category: isAssigned ? "Assigned to You" : "Your PRs",
+                footer: isAssigned ? `Your vote: ${voteIcon}` : undefined,
               };
             });
             api.ui.dialog.replace(() =>
@@ -431,7 +448,7 @@ export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
     profileName: "",
     profileCount: 0,
     profileNames: [],
-    pendingReviews: [],
+    assignedToMe: [],
     myPRs: [],
     selectedPr: null,
     view: "list",
@@ -471,7 +488,7 @@ export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
             profileName: "",
             profileCount: 0,
             profileNames: [],
-            pendingReviews: [],
+            assignedToMe: [],
             myPRs: [],
             selectedPr: null,
             view: "list",
