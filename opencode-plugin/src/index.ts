@@ -27,7 +27,7 @@
  * ```
  */
 
-import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin";
+import type { Plugin, PluginInput, Hooks, PluginModule, PluginOptions } from "@opencode-ai/plugin";
 import { z } from "zod/v4";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -46,6 +46,14 @@ interface AdoProfile {
 interface AdoConfig {
   defaultProfile?: string;
   profiles: Record<string, AdoProfile>;
+}
+
+function asAdoConfig(value: unknown): AdoConfig | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const maybe = value as { ado?: unknown; profiles?: unknown };
+  if (maybe.profiles && typeof maybe.profiles === "object") return maybe as AdoConfig;
+  if (maybe.ado && typeof maybe.ado === "object") return asAdoConfig(maybe.ado);
+  return undefined;
 }
 
 function resolveActiveProfile(config: AdoConfig): { name: string; profile: AdoProfile } {
@@ -103,10 +111,30 @@ class AdoClient {
     this.authHeader = "Basic " + Buffer.from(":" + pat).toString("base64");
   }
 
-  private async request<T>(endpoint: string, init?: RequestInit): Promise<T> {
-    const url = endpoint.startsWith("http")
-      ? `${endpoint}?api-version=${API_VERSION}`
-      : `${this.orgUrl}/${this.project}/_apis${endpoint}?api-version=${API_VERSION}`;
+  private buildUrl(endpoint: string, scope: "org" | "project" = "project"): string {
+    if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
+      const url = new URL(endpoint);
+      url.searchParams.set("api-version", API_VERSION);
+      return url.toString();
+    }
+
+    const root = scope === "org"
+      ? this.orgUrl
+      : `${this.orgUrl}/${encodeURIComponent(this.project)}`;
+    const apiPath = endpoint.startsWith("/_apis/")
+      ? endpoint
+      : `/_apis${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    const url = new URL(root + apiPath);
+    url.searchParams.set("api-version", API_VERSION);
+    return url.toString();
+  }
+
+  private async request<T>(
+    endpoint: string,
+    init?: RequestInit,
+    scope: "org" | "project" = "project",
+  ): Promise<T> {
+    const url = this.buildUrl(endpoint, scope);
     const res = await fetch(url, {
       ...init,
       headers: {
@@ -125,7 +153,9 @@ class AdoClient {
 
   async getUserIdentity(): Promise<{ id: string; displayName: string }> {
     const data = await this.request<{ authenticatedUser: { id: string; displayName: string } }>(
-      "/_apis/connectionData",
+      "/connectionData",
+      undefined,
+      "org",
     );
     return data.authenticatedUser;
   }
@@ -213,14 +243,17 @@ function fmtThread(t: any): string {
 
 // ─── Server Plugin ────────────────────────────────────────────────────────
 
-const server: Plugin = async (input: PluginInput): Promise<Hooks> => {
+const server: Plugin = async (input: PluginInput, options?: PluginOptions): Promise<Hooks> => {
   const { client } = input;
 
   // ─── Config loader ───────────────────────────────────────────────
   async function loadConfig() {
+    const fromOptions = asAdoConfig(options);
+    if (fromOptions) return fromOptions;
+
     const resp = await client.config.get().catch(() => ({ data: {} }));
     const data = (resp.data ?? {}) as Record<string, unknown>;
-    const ado = data["ado"] as AdoConfig | undefined;
+    const ado = asAdoConfig(data["ado"]);
     if (!ado || !ado.profiles || Object.keys(ado.profiles).length === 0) {
       throw new Error("No ADO config found. Add an 'ado' section to opencode.json with profiles.");
     }
@@ -330,4 +363,10 @@ const server: Plugin = async (input: PluginInput): Promise<Hooks> => {
   };
 };
 
+const pluginModule: PluginModule & { id: string } = {
+  id: "@nahuelcio/opencode-ado",
+  server,
+};
+
+export default pluginModule;
 export { server };

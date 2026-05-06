@@ -1,6 +1,6 @@
 {
   "name": "@nahuelcio/opencode-ado",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Azure DevOps plugin for OpenCode — PR reviews, profiles, sidebar panel",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,7 +15,7 @@
     },
     "./tui": {
       "types": "./dist/tui.d.ts",
-      "default": "./dist/tui.jsx"
+      "default": "./dist/tui.tsx"
     }
   },
   "oc-plugin": [
@@ -26,7 +26,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/prepare-tui-dist.mjs",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",

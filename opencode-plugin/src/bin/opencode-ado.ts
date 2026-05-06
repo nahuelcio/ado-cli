@@ -14,7 +14,6 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, platform } from "node:os";
 import { createInterface } from "node:readline";
-import { execSync } from "node:child_process";
 
 const PLUGIN_SPEC = "@nahuelcio/opencode-ado";
 const SCHEMA_URL = "https://opencode.ai/config.json";
@@ -58,14 +57,18 @@ function getOpenCodeConfigDir(): string {
   const xdg = process.env.XDG_CONFIG_HOME;
   if (xdg) return join(xdg, "opencode");
 
-  // 2. Platform default
+  // 2. OpenCode uses ~/.config/opencode on Windows too.
+  const homeConfig = join(homedir(), ".config", "opencode");
+  if (existsSync(homeConfig)) return homeConfig;
+
+  // 3. Legacy Windows fallback used by older versions of this CLI.
   if (platform() === "win32") {
     const appData = process.env.APPDATA;
     if (appData) return join(appData, "opencode");
   }
 
-  // 3. ~/.config/opencode
-  return join(homedir(), ".config", "opencode");
+  // 4. ~/.config/opencode
+  return homeConfig;
 }
 
 function getAdoCredentialsDir(): string {
@@ -89,8 +92,59 @@ function findConfigFile(dir: string): string | null {
 function readConfig(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
   const raw = readFileSync(path, "utf-8");
-  const stripped = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-  return JSON.parse(stripped);
+  return JSON.parse(stripJsonComments(raw.replace(/^\uFEFF/, "")));
+}
+
+function stripJsonComments(input: string): string {
+  let out = "";
+  let inString = false;
+  let stringQuote = "";
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+    const next = input[i + 1];
+
+    if (inString) {
+      out += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === stringQuote) {
+        inString = false;
+        stringQuote = "";
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      inString = true;
+      stringQuote = char;
+      out += char;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      while (i < input.length && input[i] !== "\n") i++;
+      out += "\n";
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      i += 2;
+      while (i < input.length && !(input[i] === "*" && input[i + 1] === "/")) {
+        out += input[i] === "\n" ? "\n" : " ";
+        i++;
+      }
+      i++;
+      continue;
+    }
+
+    out += char;
+  }
+
+  return out;
 }
 
 function writeConfig(path: string, data: Record<string, unknown>): void {
@@ -114,15 +168,8 @@ function storePAT(pat: string): void {
     try { chmodSync(path, 0o600); } catch { /* best effort */ }
   }
 
-  // Also try setx on Windows for persistent env var
-  if (platform() === "win32") {
-    try {
-      execSync(`setx AZURE_DEVOPS_PAT "${pat.trim()}"`, { stdio: "pipe" });
-      console.log(`  ${green("✓")} Set AZURE_DEVOPS_PAT via setx (restart terminal to apply)`);
-    } catch {
-      // setx not available or failed — file-based fallback still works
-    }
-  }
+  // Do not persist the PAT into the user environment. The plugin reads this file
+  // as a fallback when the configured env var is not present.
 }
 
 function loadStoredPAT(): string | null {
@@ -141,6 +188,34 @@ interface ProfileConfig {
   patEnvVar: string;
   repos: string[];
   default?: boolean;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function pluginMatches(entry: unknown): boolean {
+  if (typeof entry === "string") return entry === PLUGIN_SPEC || entry.startsWith(PLUGIN_SPEC + "@");
+  if (Array.isArray(entry)) return entry[0] === PLUGIN_SPEC;
+  return false;
+}
+
+function getPluginAdoConfig(plugins: unknown[]): Record<string, unknown> | undefined {
+  const entry = plugins.find(pluginMatches);
+  if (!Array.isArray(entry)) return undefined;
+  const options = asRecord(entry[1]);
+  if (!options) return undefined;
+  const nested = asRecord(options["ado"]);
+  return nested ?? options;
+}
+
+function upsertPluginConfig(plugins: unknown[], adoConfig: Record<string, unknown>): void {
+  const entry = [PLUGIN_SPEC, adoConfig];
+  const index = plugins.findIndex(pluginMatches);
+  if (index >= 0) plugins[index] = entry;
+  else plugins.push(entry);
 }
 
 async function runInit(_cwd: string): Promise<number> {
@@ -208,6 +283,9 @@ async function runInit(_cwd: string): Promise<number> {
     const isDefault = isFirstProfile || await yesNo("Set as default profile?", false);
 
     const profileName = project.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    if (isDefault) {
+      for (const existing of Object.values(profiles)) delete existing.default;
+    }
 
     profiles[profileName] = {
       org,
@@ -256,18 +334,11 @@ async function runInit(_cwd: string): Promise<number> {
 
   // Ensure plugin array
   if (!Array.isArray(config["plugin"])) config["plugin"] = [];
-  const plugins = config["plugin"] as (string | unknown[])[];
+  const plugins = config["plugin"] as unknown[];
 
-  const alreadyHas = plugins.some((p) => {
-    if (typeof p === "string") return p === PLUGIN_SPEC || p.startsWith(PLUGIN_SPEC + "@");
-    if (Array.isArray(p)) return p[0] === PLUGIN_SPEC;
-    return false;
-  });
-  if (!alreadyHas) plugins.push(PLUGIN_SPEC);
-
-  // Build ado config — merge with existing profiles
-  if (!config["ado"] || typeof config["ado"] !== "object") config["ado"] = {};
-  const ado = config["ado"] as Record<string, unknown>;
+  // Build plugin options — merge with existing profiles. OpenCode 1.4 rejects
+  // arbitrary top-level keys, so ADO config must live in plugin options.
+  const ado = getPluginAdoConfig(plugins) ?? asRecord(config["ado"]) ?? {};
 
   if (!ado["profiles"] || typeof ado["profiles"] !== "object") ado["profiles"] = {};
   const existingProfiles = ado["profiles"] as Record<string, ProfileConfig>;
@@ -277,6 +348,8 @@ async function runInit(_cwd: string): Promise<number> {
   }
 
   if (defaultProfileName) ado["defaultProfile"] = defaultProfileName;
+  delete config["ado"];
+  upsertPluginConfig(plugins, ado);
 
   writeConfig(configPath, config);
   console.log();
@@ -309,7 +382,8 @@ async function runShow(): Promise<number> {
   }
 
   const config = readConfig(configPath);
-  const ado = config["ado"] as Record<string, unknown> | undefined;
+  const plugins = Array.isArray(config["plugin"]) ? config["plugin"] as unknown[] : [];
+  const ado = getPluginAdoConfig(plugins) ?? asRecord(config["ado"]);
   if (!ado?.["profiles"]) {
     console.log(yellow("  No ado.profiles configured"));
     return 1;

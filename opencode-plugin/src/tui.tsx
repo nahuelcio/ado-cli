@@ -11,7 +11,7 @@
  * and refreshes on session/message update events.
  */
 
-import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui";
+import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createSignal, onCleanup } from "solid-js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -30,6 +30,14 @@ interface AdoProfile {
 interface AdoConfig {
   defaultProfile?: string;
   profiles: Record<string, AdoProfile>;
+}
+
+function asAdoConfig(value: unknown): AdoConfig | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const maybe = value as { ado?: unknown; profiles?: unknown };
+  if (maybe.profiles && typeof maybe.profiles === "object") return maybe as AdoConfig;
+  if (maybe.ado && typeof maybe.ado === "object") return asAdoConfig(maybe.ado);
+  return undefined;
 }
 
 interface SidebarData {
@@ -77,16 +85,19 @@ function getPAT(envVarName: string): string | undefined {
   return undefined;
 }
 
-async function readConfig(client: TuiPluginApi["client"]): Promise<AdoConfig> {
+async function readConfig(client: TuiPluginApi["client"], options?: unknown): Promise<AdoConfig> {
+  const fromOptions = asAdoConfig(options);
+  if (fromOptions) return fromOptions;
+
   const resp = await client.config.get().catch(() => ({ data: {} }));
   const data = (resp.data ?? {}) as Record<string, unknown>;
-  const ado = data["ado"] as AdoConfig | undefined;
+  const ado = asAdoConfig(data["ado"]);
   if (!ado?.profiles) throw new Error("No ADO config in opencode.json");
   return ado;
 }
 
-async function fetchSidebarData(client: TuiPluginApi["client"]): Promise<SidebarData> {
-  const config = await readConfig(client);
+async function fetchSidebarData(client: TuiPluginApi["client"], options?: unknown): Promise<SidebarData> {
+  const config = await readConfig(client, options);
   const { name, profile } = resolveActiveProfile(config);
   const pat = getPAT(profile.patEnvVar);
   if (!pat) return { status: "error", profileName: name, pendingReviews: [], myPRs: [], error: `Set env var ${profile.patEnvVar}` };
@@ -94,15 +105,20 @@ async function fetchSidebarData(client: TuiPluginApi["client"]): Promise<Sidebar
   const orgUrl = resolveOrgUrl(profile.org);
   const authHeader = "Basic " + Buffer.from(":" + pat).toString("base64");
 
-  const doReq = async (endpoint: string) => {
-    const url = `${orgUrl}/${profile.project}/_apis${endpoint}?api-version=7.1`;
+  const doReq = async (endpoint: string, scope: "org" | "project" = "project") => {
+    const root = scope === "org" ? orgUrl : `${orgUrl}/${encodeURIComponent(profile.project)}`;
+    const apiPath = endpoint.startsWith("/_apis/")
+      ? endpoint
+      : `/_apis${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    const url = new URL(root + apiPath);
+    url.searchParams.set("api-version", "7.1");
     const res = await fetch(url, { headers: { Authorization: authHeader, Accept: "application/json" } });
     if (!res.ok) throw new Error(`ADO ${res.status}`);
     return res.json() as Promise<{ value: any[] }>;
   };
 
   // Get user identity
-  const connData = await doReq("/_apis/connectionData") as any;
+  const connData = await doReq("/connectionData", "org") as any;
   const userId: string | undefined = connData?.authenticatedUser?.id;
 
   const pending: PRSummary[] = [];
@@ -110,7 +126,7 @@ async function fetchSidebarData(client: TuiPluginApi["client"]): Promise<Sidebar
 
   for (const repo of profile.repos) {
     try {
-      const data = await doReq(`/git/repositories/${encodeURIComponent(repo)}/pullrequests&searchCriteria.status=active`);
+      const data = await doReq(`/git/repositories/${encodeURIComponent(repo)}/pullrequests?searchCriteria.status=active`);
       for (const pr of data.value) {
         const summary: PRSummary = {
           id: pr.pullRequestId,
@@ -140,13 +156,11 @@ function shortRef(ref: string | undefined): string {
 
 // ─── TUI Plugin Export ────────────────────────────────────────────────────
 
-export const tui: TuiPlugin = async (api: TuiPluginApi) => {
-  const ID = "@nahuelcio/opencode-ado";
-
+export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
   api.slots.register({
     order: 200,
     slots: {
-      sidebar_content(ctx) {
+      sidebar_content() {
         // ─── Reactive State ──────────────────────────────────────
         const [data, setData] = createSignal<SidebarData>({
           status: "loading",
@@ -159,7 +173,7 @@ export const tui: TuiPlugin = async (api: TuiPluginApi) => {
         const refresh = async () => {
           if (disposed) return;
           try {
-            const result = await fetchSidebarData(api.client);
+            const result = await fetchSidebarData(api.client, options);
             if (!disposed) setData(result);
           } catch (err) {
             if (!disposed) setData({
@@ -236,3 +250,10 @@ export const tui: TuiPlugin = async (api: TuiPluginApi) => {
     },
   });
 };
+
+const pluginModule: TuiPluginModule & { id: string } = {
+  id: "@nahuelcio/opencode-ado",
+  tui,
+};
+
+export default pluginModule;
