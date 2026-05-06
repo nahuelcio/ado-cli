@@ -12,7 +12,7 @@
  */
 
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, Match, onCleanup, Switch } from "solid-js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -56,6 +56,13 @@ interface PRSummary {
   target: string;
   author: string;
   isDraft: boolean;
+}
+
+function reviewerMatchesUser(reviewer: any, userId: string | undefined): boolean {
+  if (!userId) return false;
+  return reviewer?.id === userId
+    || reviewer?.votedBy?.id === userId
+    || reviewer?.uniqueName === userId;
 }
 
 // ─── Config & Client (lightweight, self-contained) ────────────────────────
@@ -137,7 +144,7 @@ async function fetchSidebarData(client: TuiPluginApi["client"], options?: unknow
           author: pr.createdBy?.displayName ?? "?",
           isDraft: !!pr.isDraft,
         };
-        const myReview = pr.reviewers?.find((r: any) => r.votedBy?.id === userId);
+        const myReview = pr.reviewers?.find((r: any) => reviewerMatchesUser(r, userId));
         if (myReview && myReview.vote === 0) pending.push(summary);
         if (pr.createdBy?.id === userId) mine.push(summary);
       }
@@ -205,46 +212,48 @@ export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
           unsubMsg();
         });
 
-        // ─── Render ──────────────────────────────────────────────
-        const d = data;
-        if (d().status === "loading") return <text fg="gray">Loading PRs...</text>;
-        if (d().status === "error") return <text fg="red">ADO: {d().error ?? "Unknown error"}</text>;
-
-        const pending = d().pendingReviews;
-        const mine = d().myPRs;
-
         return (
-          <box gap={0}>
-            <text fg={api.theme.current.text}>
-              <b>Azure DevOps ({d().profileName})</b>
-            </text>
-            {pending.length > 0 && (
+          <Switch>
+            <Match when={data().status === "loading"}>
+              <text fg="gray">Loading PRs...</text>
+            </Match>
+            <Match when={data().status === "error"}>
+              <text fg="red">ADO: {data().error ?? "Unknown error"}</text>
+            </Match>
+            <Match when={data().status === "ready"}>
               <box gap={0}>
-                <text fg="yellow">Pending Review ({pending.length})</text>
-                {pending.map((pr) => (
-                  <text wrapMode="none">
-                    {"  "}#{pr.id} {pr.repo}/{shortRef(pr.source)} → {shortRef(pr.target)}{"  "}
-                    <text fg="gray">{pr.author} — {pr.title}</text>
-                  </text>
-                ))}
+                <text fg={api.theme.current.text}>
+                  <b>Azure DevOps ({data().profileName})</b>
+                </text>
+                {data().pendingReviews.length > 0 && (
+                  <box gap={0}>
+                    <text fg="yellow">Pending Review ({data().pendingReviews.length})</text>
+                    {data().pendingReviews.map((pr) => (
+                      <text wrapMode="none">
+                        {"  "}#{pr.id} {pr.repo}/{shortRef(pr.source)} → {shortRef(pr.target)}{"  "}
+                        <text fg="gray">{pr.author} — {pr.title}</text>
+                      </text>
+                    ))}
+                  </box>
+                )}
+                {data().myPRs.length > 0 && (
+                  <box gap={0}>
+                    <text fg="green">Your PRs ({data().myPRs.length})</text>
+                    {data().myPRs.map((pr) => (
+                      <text wrapMode="none">
+                        {"  "}#{pr.id} {pr.repo}/{shortRef(pr.source)} → {shortRef(pr.target)}
+                        {pr.isDraft && <text fg="gray"> [DRAFT]</text>}
+                        {"  "}<text fg="gray">{pr.title}</text>
+                      </text>
+                    ))}
+                  </box>
+                )}
+                {data().pendingReviews.length === 0 && data().myPRs.length === 0 && (
+                  <text fg="gray">No active PRs</text>
+                )}
               </box>
-            )}
-            {mine.length > 0 && (
-              <box gap={0}>
-                <text fg="green">Your PRs ({mine.length})</text>
-                {mine.map((pr) => (
-                  <text wrapMode="none">
-                    {"  "}#{pr.id} {pr.repo}/{shortRef(pr.source)} → {shortRef(pr.target)}
-                    {pr.isDraft && <text fg="gray"> [DRAFT]</text>}
-                    {"  "}<text fg="gray">{pr.title}</text>
-                  </text>
-                ))}
-              </box>
-            )}
-            {pending.length === 0 && mine.length === 0 && (
-              <text fg="gray">No active PRs</text>
-            )}
-          </box>
+            </Match>
+          </Switch>
         );
       },
     },

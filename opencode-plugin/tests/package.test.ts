@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 describe("package metadata", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
   const cliSource = readFileSync(new URL("../src/bin/opencode-ado.ts", import.meta.url), "utf-8");
+  const tuiSource = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf-8");
 
   it("publishes the TUI source expected by OpenCode", () => {
     expect(pkg.exports["./tui"].default).toBe("./dist/tui.tsx");
@@ -30,5 +31,11 @@ describe("package metadata", () => {
     expect(cliSource).toContain("getVersionedPluginSpec");
     expect(cliSource).toContain("pkg.version");
     expect(cliSource).toContain("startsWith(`${PLUGIN_SPEC}@`)");
+  });
+
+  it("renders sidebar state reactively after PR loading completes", () => {
+    expect(tuiSource).toContain("Switch");
+    expect(tuiSource).toContain("Match");
+    expect(tuiSource).not.toContain('if (d().status === "loading") return');
   });
 });

@@ -209,6 +209,12 @@ function shortBranch(ref?: string): string {
   return ref.replace("refs/heads/", "").replace("refs/tags/", "");
 }
 
+function reviewerMatchesUser(reviewer: any, userId: string): boolean {
+  return reviewer?.id === userId
+    || reviewer?.votedBy?.id === userId
+    || reviewer?.uniqueName === userId;
+}
+
 function fmtPR(pr: any): string {
   const repo = pr.repository?.name ?? "?";
   const src = shortBranch(pr.sourceRefName);
@@ -287,7 +293,7 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
             } catch { /* skip failing repos */ }
           }
 
-          const pending = allPRs.filter(pr => pr.reviewers?.some((r: any) => r.votedBy?.id === userId.id && r.vote === 0));
+          const pending = allPRs.filter(pr => pr.reviewers?.some((r: any) => reviewerMatchesUser(r, userId.id) && r.vote === 0));
           const mine = allPRs.filter(pr => pr.createdBy?.id === userId.id);
 
           let out = `## Azure DevOps — Active PRs (${name})\n\n`;
