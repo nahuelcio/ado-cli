@@ -50,6 +50,7 @@ import { getActiveProfile, setActiveProfile, getSelectedPr, setSelectedPr, clear
 // ─── ADO HTTP Client (minimal, inline) ────────────────────────────────────
 
 const API_VERSION = "7.1";
+const WIT_COMMENTS_API_VERSION = "7.1-preview.4";
 
 class AdoClient {
   private authHeader: string;
@@ -251,23 +252,23 @@ class AdoClient {
 
   async getWorkItemComments(id: number): Promise<any> {
     const data = await this.request<{ value: any[] }>(
-      `/_apis/wit/workitems/${id}/comments`,
+      `/_apis/wit/workItems/${id}/comments`,
       undefined,
       "project",
-      "7.1-preview.2",
+      WIT_COMMENTS_API_VERSION,
     );
     return data;
   }
 
   async addWorkItemComment(id: number, text: string): Promise<any> {
     return this.request<any>(
-      `/_apis/wit/workitems/${id}/comments`,
+      `/_apis/wit/workItems/${id}/comments`,
       {
         method: "POST",
         body: JSON.stringify({ text }),
       },
       "project",
-      "7.1-preview.2",
+      WIT_COMMENTS_API_VERSION,
     );
   }
 

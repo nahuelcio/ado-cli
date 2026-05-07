@@ -94,6 +94,12 @@ describe("package metadata", () => {
     expect(serverSource).toContain("Comment added to QA Feedback");
   });
 
+  it("uses the documented WIT comments endpoint/version for QA feedback comments", () => {
+    expect(serverSource).toContain('WIT_COMMENTS_API_VERSION = "7.1-preview.4"');
+    expect(serverSource).toContain("`/_apis/wit/workItems/${id}/comments`");
+    expect(serverSource).not.toContain("`/_apis/wit/workitems/${id}/comments`");
+  });
+
   it("maps assignedTo=me to @Me and includes related work items in WI/QA details", () => {
     expect(serverSource).toContain("function assignedToCondition");
     expect(serverSource).toContain('normalized.toLowerCase() === "me"');
