@@ -16,6 +16,8 @@
 
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { createSignal, Match, Switch } from "solid-js";
+import { useKeyboard } from "@opentui/solid";
+import type { KeyEvent, BoxRenderable } from "@opentui/core";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -318,13 +320,88 @@ function resolveWiSelection(
   return fetched.workItems[0];
 }
 
+// ─── Bridge variables for focus management (set by component, used by commands) ──
+
+let focusSidebarList: () => void = () => {};
+let blurSidebarList: () => void = () => {};
+let isSidebarListFocused: () => boolean = () => false;
+
 // ─── Sidebar Content View ──────────────────────────────────────────────────
 
 function SidebarContentView(props: {
   api: TuiPluginApi;
   data: () => SidebarData;
+  setData: (fn: (prev: SidebarData) => SidebarData) => void;
 }) {
   const d = props.data;
+  const setData = props.setData;
+
+  // Focus state
+  const [listFocused, setListFocused] = createSignal(false);
+  let listContainer: BoxRenderable | undefined;
+
+  // Keyboard navigation hook
+  useKeyboard((event: KeyEvent) => {
+    if (!listFocused()) return;
+    const name = event.name.toLowerCase();
+
+    if (name === "j" || name === "down" || name === "arrowdown") {
+      // move focusIndex down, wrap
+      setData((prev) => {
+        const items = prev.sidebarView === "wis" ? prev.workItems : prev.qaFeedbacks;
+        const count = items.length;
+        if (count === 0) return prev;
+        return { ...prev, focusIndex: prev.focusIndex + 1 >= count ? 0 : prev.focusIndex + 1 };
+      });
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (name === "k" || name === "up" || name === "arrowup") {
+      // move focusIndex up, wrap
+      setData((prev) => {
+        const items = prev.sidebarView === "wis" ? prev.workItems : prev.qaFeedbacks;
+        const count = items.length;
+        if (count === 0) return prev;
+        return { ...prev, focusIndex: prev.focusIndex - 1 < 0 ? count - 1 : prev.focusIndex - 1 };
+      });
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (name === "return" || name === "enter") {
+      // select highlighted item
+      const current = d();
+      const items = current.sidebarView === "wis" ? current.workItems : current.qaFeedbacks;
+      if (items.length === 0) return;
+      const idx = current.focusIndex;
+      if (idx >= 0 && idx < items.length) {
+        const focused = items[idx];
+        setSelectedWi(current.profileName, focused.id);
+        setData((prev) => ({ ...prev, selectedWi: focused }));
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (name === "escape" || name === "esc") {
+      listContainer?.blur();
+      setListFocused(false);
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
+
+  // Bridge functions for command palette access
+  focusSidebarList = () => {
+    if (!listContainer) return;
+    const current = d();
+    const items = current.sidebarView === "wis" ? current.workItems : current.qaFeedbacks;
+    if (items.length === 0) return;
+    listContainer.focus();
+    setListFocused(true);
+  };
+
+  blurSidebarList = () => {
+    listContainer?.blur();
+    setListFocused(false);
+  };
+
+  isSidebarListFocused = () => listFocused();
 
   return (
     <Switch>
@@ -363,7 +440,7 @@ function SidebarContentView(props: {
 
           {/* Keyboard hints for WI/QA navigation */}
           {(d().sidebarView === "wis" || d().sidebarView === "qa") && (
-            <text fg="gray">cmd/ctrl+P → "Next Item" / "Previous Item" to move cursor</text>
+            <text fg="gray">alt+w: focus list | j/k: navigate | enter: select | esc: blur</text>
           )}
 
           {/* ── PRs View ── */}
@@ -414,47 +491,56 @@ function SidebarContentView(props: {
             </>
           )}
 
-          {/* ── Work Items View ── */}
-          {d().sidebarView === "wis" && (
-            <box gap={0}>
-              <text fg="yellow">{`Work Items Assigned to You (${String(d().workItems.length)})`}</text>
-              {d().workItems.length === 0 && <text fg="gray">No work items assigned</text>}
-              {d().workItems.map((wi, idx) => {
-                const sel = d().selectedWi?.id === wi.id;
-                const focused = idx === d().focusIndex;
-                const marker = sel ? "► " : focused ? "> " : "  ";
-                const fg = sel ? "cyan" : focused ? "yellow" : undefined;
-                return (
-                  <text wrapMode="none" fg={fg}>
-                    {marker}
-                    {`#${String(wi.id)} [${wi.type}] ${wi.state} — ${wi.title}`}
-                    {" "}<span style={{ fg: "gray" }}>{`P${String(wi.priority)} | ${wi.assignedTo}`}</span>
-                  </text>
-                );
-              })}
-            </box>
-          )}
+          {/* Focusable list wrapper for WI/QA views */}
+          <box
+            ref={(element: BoxRenderable) => { listContainer = element; if (!element) setListFocused(false); }}
+            flexDirection="column"
+            backgroundColor={listFocused() ? props.api.theme.current.backgroundPanel : undefined}
+            focusable
+            focused={listFocused()}
+          >
+            {/* ── Work Items View ── */}
+            {d().sidebarView === "wis" && (
+              <>
+                <text fg="yellow">{`Work Items Assigned to You (${String(d().workItems.length)})`}</text>
+                {d().workItems.length === 0 && <text fg="gray">No work items assigned</text>}
+                {d().workItems.map((wi, idx) => {
+                  const sel = d().selectedWi?.id === wi.id;
+                  const focused = idx === d().focusIndex;
+                  const marker = sel ? "► " : focused ? "> " : "  ";
+                  const fg = sel ? "cyan" : focused ? "yellow" : undefined;
+                  return (
+                    <text wrapMode="none" fg={fg}>
+                      {marker}
+                      {`#${String(wi.id)} [${wi.type}] ${wi.state} — ${wi.title}`}
+                      {" "}<span style={{ fg: "gray" }}>{`P${String(wi.priority)} | ${wi.assignedTo}`}</span>
+                    </text>
+                  );
+                })}
+              </>
+            )}
 
-          {/* ── QA Feedbacks View ── */}
-          {d().sidebarView === "qa" && (
-            <box gap={0}>
-              <text fg="magenta">{`QA Feedbacks (${String(d().qaFeedbacks.length)})`}</text>
-              {d().qaFeedbacks.length === 0 && <text fg="gray">No QA Feedbacks</text>}
-              {d().qaFeedbacks.map((fb, idx) => {
-                const sel = d().selectedWi?.id === fb.id;
-                const focused = idx === d().focusIndex;
-                const marker = sel ? "► " : focused ? "> " : "  ";
-                const fg = sel ? "cyan" : focused ? "yellow" : undefined;
-                return (
-                  <text wrapMode="none" fg={fg}>
-                    {marker}
-                    {`#${String(fb.id)} [${fb.type}] ${fb.state} — ${fb.title}`}
-                    {" "}<span style={{ fg: "gray" }}>{`P${String(fb.priority)} | ${fb.assignedTo}`}</span>
-                  </text>
-                );
-              })}
-            </box>
-          )}
+            {/* ── QA Feedbacks View ── */}
+            {d().sidebarView === "qa" && (
+              <>
+                <text fg="magenta">{`QA Feedbacks (${String(d().qaFeedbacks.length)})`}</text>
+                {d().qaFeedbacks.length === 0 && <text fg="gray">No QA Feedbacks</text>}
+                {d().qaFeedbacks.map((fb, idx) => {
+                  const sel = d().selectedWi?.id === fb.id;
+                  const focused = idx === d().focusIndex;
+                  const marker = sel ? "► " : focused ? "> " : "  ";
+                  const fg = sel ? "cyan" : focused ? "yellow" : undefined;
+                  return (
+                    <text wrapMode="none" fg={fg}>
+                      {marker}
+                      {`#${String(fb.id)} [${fb.type}] ${fb.state} — ${fb.title}`}
+                      {" "}<span style={{ fg: "gray" }}>{`P${String(fb.priority)} | ${fb.assignedTo}`}</span>
+                    </text>
+                  );
+                })}
+              </>
+            )}
+          </box>
 
           {/* ── Selected Detail (PR or WI/QA) ── */}
           {d().sidebarView === "prs" && d().selectedPr && (() => {
@@ -748,51 +834,18 @@ function registerCommands(
       });
     }
 
-    // ── Keyboard Navigation (WI/QA views) ──
+    // ── Focus WI/QA List ──
     commands.push({
-      title: "Next Item",
-      value: "ado:nav-down",
+      title: "ADO: Focus WI/QA List",
+      value: "ado:focus-list",
+      keybind: "alt+w",
       category: "ADO",
       enabled: d.sidebarView === "wis" || d.sidebarView === "qa",
       onSelect: () => {
-        setData((prev) => {
-          const items = prev.sidebarView === "wis" ? prev.workItems : prev.qaFeedbacks;
-          const count = items.length;
-          if (count === 0) return prev;
-          return { ...prev, focusIndex: prev.focusIndex + 1 >= count ? 0 : prev.focusIndex + 1 };
-        });
-      },
-    });
-
-    commands.push({
-      title: "Previous Item",
-      value: "ado:nav-up",
-      category: "ADO",
-      enabled: d.sidebarView === "wis" || d.sidebarView === "qa",
-      onSelect: () => {
-        setData((prev) => {
-          const items = prev.sidebarView === "wis" ? prev.workItems : prev.qaFeedbacks;
-          const count = items.length;
-          if (count === 0) return prev;
-          return { ...prev, focusIndex: prev.focusIndex - 1 < 0 ? count - 1 : prev.focusIndex - 1 };
-        });
-      },
-    });
-
-    commands.push({
-      title: "Select Highlighted Item",
-      value: "ado:nav-select",
-      category: "ADO",
-      enabled: d.sidebarView === "wis" || d.sidebarView === "qa",
-      onSelect: () => {
-        const current = data();
-        const items = current.sidebarView === "wis" ? current.workItems : current.qaFeedbacks;
-        if (items.length === 0) return;
-        const idx = current.focusIndex;
-        if (idx >= 0 && idx < items.length) {
-          const focused = items[idx];
-          setSelectedWi(current.profileName, focused.id);
-          setData((prev) => ({ ...prev, selectedWi: focused }));
+        if (isSidebarListFocused()) {
+          blurSidebarList();
+        } else {
+          focusSidebarList();
         }
       },
     });
@@ -968,7 +1021,7 @@ export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
     order: 200,
     slots: {
       sidebar_content() {
-        return <SidebarContentView api={api} data={data} />;
+        return <SidebarContentView api={api} data={data} setData={setData} />;
       },
     },
   });

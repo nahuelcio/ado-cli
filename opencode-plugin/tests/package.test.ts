@@ -38,7 +38,7 @@ describe("package metadata", () => {
 
   it("renders sidebar state reactively after PR loading completes", () => {
     expect(tuiSource).toContain("function SidebarContentView");
-    expect(tuiSource).toContain("<SidebarContentView api={api} data={data} />");
+    expect(tuiSource).toContain("<SidebarContentView api={api} data={data} setData={setData} />");
     expect(tuiSource).toContain("Switch");
     expect(tuiSource).toContain("Match");
     expect(tuiSource).not.toContain('if (d().status === "loading") return');
