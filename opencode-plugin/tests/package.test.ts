@@ -5,6 +5,7 @@ describe("package metadata", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
   const cliSource = readFileSync(new URL("../src/bin/opencode-ado.ts", import.meta.url), "utf-8");
   const tuiSource = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf-8");
+  const serverSource = readFileSync(new URL("../src/index.ts", import.meta.url), "utf-8");
 
   it("publishes the TUI source expected by OpenCode", () => {
     expect(pkg.exports["./tui"].default).toBe("./dist/tui.tsx");
@@ -65,5 +66,30 @@ describe("package metadata", () => {
     expect(tuiSource).toContain("api.lifecycle.onDispose");
     expect(tuiSource).toContain("let inFlight: Promise<void> | undefined");
     expect(tuiSource).toContain("const [data, setData] = createSignal<SidebarData>");
+  });
+
+  it("keeps WI/QA list focus and collapse controls usable from mouse and keyboard", () => {
+    expect(tuiSource).toContain("handleMouseAction");
+    expect(tuiSource).toContain("toggleStateGroup");
+    expect(tuiSource).toContain("click headers: expand/collapse");
+    expect(tuiSource).toContain('if (name === "j" || name === "down" || name === "arrowdown")');
+    expect(tuiSource).toContain('keybind: "alt+a"');
+    expect(tuiSource).toContain('keybind: "alt+w"');
+    expect(tuiSource).toContain("ado:focus-list-legacy-alt-w");
+    expect(tuiSource).not.toContain("renderBefore={refreshListFocused}");
+  });
+
+  it("supports standalone PR comments including optional file/line context", () => {
+    expect(serverSource).toContain("ado_pr_comment");
+    expect(serverSource).toContain("filePath");
+    expect(serverSource).toContain("rightFileStart");
+    expect(serverSource).toContain("Provide filePath when specifying line.");
+  });
+
+  it("provides explicit QA Feedback update and comment aliases", () => {
+    expect(serverSource).toContain("ado_qa_feedback_update");
+    expect(serverSource).toContain("ado_qa_feedback_comment");
+    expect(serverSource).toContain("## QA Feedback Updated");
+    expect(serverSource).toContain("Comment added to QA Feedback");
   });
 });

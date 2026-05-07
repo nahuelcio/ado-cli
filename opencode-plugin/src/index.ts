@@ -165,7 +165,18 @@ class AdoClient {
     );
   }
 
-  async createThread(repo: string, prId: number, comment: string) {
+  async createThread(repo: string, prId: number, comment: string, context?: { filePath?: string; line?: number }) {
+    const threadContext = context?.filePath
+      ? {
+          filePath: context.filePath,
+          ...(context.line
+            ? {
+                rightFileStart: { line: context.line, offset: 1 },
+                rightFileEnd: { line: context.line, offset: 1 },
+              }
+            : {}),
+        }
+      : undefined;
     return this.request<any>(
       `/git/repositories/${encodeURIComponent(repo)}/pullrequests/${prId}/threads`,
       {
@@ -173,6 +184,7 @@ class AdoClient {
         body: JSON.stringify({
           comments: [{ content: comment, commentType: "text" }],
           status: "active",
+          ...(threadContext ? { threadContext } : {}),
         }),
       },
     );
@@ -430,6 +442,29 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
           const threads = await ado.getThreads(resolved.repo, resolved.prId);
           if (!threads.length) return `No threads found for PR #${resolved.prId}.`;
           return `## Threads for PR #${resolved.prId} (${resolved.repo})\n\n${threads.map(fmtThread).join("\n")}`;
+        },
+      },
+
+      ado_pr_comment: {
+        description: "Add a standalone comment thread to an Azure DevOps pull request. If repo/prId are omitted, uses the PR selected in the sidebar. Optionally attach it to a file and line.",
+        args: {
+          repo: z.string().optional().describe("Repository name (omit to use sidebar selection)"),
+          prId: z.number().optional().describe("Pull request ID (omit to use sidebar selection)"),
+          comment: z.string().describe("Comment text"),
+          filePath: z.string().optional().describe("Optional file path to attach the comment to, e.g. /src/app.ts"),
+          line: z.number().optional().describe("Optional 1-based line number. Requires filePath."),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ repo, prId, comment, filePath, line, profile }: { repo?: string; prId?: number; comment: string; filePath?: string; line?: number; profile?: string }) {
+          if (line !== undefined && !filePath) return "Provide filePath when specifying line.";
+          const resolved = resolvePrArgs({ repo, prId });
+          const { client: ado } = await createClient(profile);
+          await ado.createThread(resolved.repo, resolved.prId, comment, { filePath, line });
+          let out = `## PR Comment Added\n\nPR: #${resolved.prId} in ${resolved.repo}\n`;
+          if (filePath) out += `File: ${filePath}\n`;
+          if (line !== undefined) out += `Line: ${line}\n`;
+          out += `Comment: ${comment}\n`;
+          return out;
         },
       },
 
@@ -906,6 +941,45 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
             }
           }
           return out;
+        },
+      },
+
+      ado_qa_feedback_update: {
+        description: "Update a QA Feedback work item. Supports changing state, priority, and adding an optional comment.",
+        args: {
+          id: z.number().describe("QA Feedback work item ID"),
+          state: z.string().optional().describe("New state value (e.g. Active, Resolved, Closed)"),
+          priority: z.number().optional().describe("New priority value"),
+          comment: z.string().optional().describe("Optional comment to add with the update"),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ id, state, priority, comment, profile }: { id: number; state?: string; priority?: number; comment?: string; profile?: string }) {
+          const { client: ado } = await createClient(profile);
+          const patchOps: Array<{ op: string; path: string; value: any }> = [];
+          if (state) patchOps.push({ op: "replace", path: "/fields/System.State", value: state });
+          if (priority !== undefined) patchOps.push({ op: "replace", path: "/fields/Microsoft.VSTS.Common.Priority", value: priority });
+          if (patchOps.length === 0 && !comment) return "No changes specified. Provide state, priority, or comment.";
+          if (patchOps.length > 0) await ado.updateWorkItem(id, patchOps);
+          if (comment) await ado.addWorkItemComment(id, comment);
+          let out = `## QA Feedback Updated\n\nQA Feedback: #${id}\n`;
+          if (state) out += `State: ${state}\n`;
+          if (priority !== undefined) out += `Priority: ${priority}\n`;
+          if (comment) out += `Comment added\n`;
+          return out;
+        },
+      },
+
+      ado_qa_feedback_comment: {
+        description: "Add a comment to a QA Feedback work item.",
+        args: {
+          id: z.number().describe("QA Feedback work item ID"),
+          comment: z.string().describe("Comment text"),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ id, comment, profile }: { id: number; comment: string; profile?: string }) {
+          const { client: ado } = await createClient(profile);
+          await ado.addWorkItemComment(id, comment);
+          return `Comment added to QA Feedback #${id}.`;
         },
       },
     },

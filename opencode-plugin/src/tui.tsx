@@ -405,6 +405,44 @@ function SidebarContentView(props: {
   const [listFocused, setListFocused] = createSignal(false);
   let listContainer: BoxRenderable | undefined;
 
+  const itemsForCurrentView = (current: SidebarData): WorkItemSummary[] =>
+    current.sidebarView === "wis" ? current.workItems : current.qaFeedbacks;
+
+  const focusListAfterMouse = (): void => {
+    if (!listFocused()) {
+      listContainer?.focus();
+      setListFocused(true);
+    }
+  };
+
+  const toggleStateGroup = (state: string, targetIndex: number): void => {
+    const current = d();
+    const items = itemsForCurrentView(current);
+    const newCollapsed = { ...current.collapsedStates };
+    const isCollapsed = newCollapsed[state] !== false;
+    newCollapsed[state] = !isCollapsed;
+    setCollapsedStates(newCollapsed);
+    const newTargets = buildFocusTargets(items, newCollapsed);
+    const newFocus = Math.min(targetIndex, newTargets.length - 1);
+    setData((prev) => ({
+      ...prev,
+      collapsedStates: newCollapsed,
+      focusIndex: Math.max(0, newFocus),
+    }));
+  };
+
+  const selectWorkItem = (item: WorkItemSummary): void => {
+    setSelectedWi(d().profileName, item.id);
+    setData((prev) => ({ ...prev, selectedWi: item }));
+  };
+
+  const handleMouseAction = (event: { stopPropagation?: () => void; preventDefault?: () => void }, action: () => void): void => {
+    event.stopPropagation?.();
+    event.preventDefault?.();
+    action();
+    focusListAfterMouse();
+  };
+
   // Keyboard navigation hook
   useKeyboard((event: KeyEvent) => {
     if (!listFocused()) return;
@@ -434,26 +472,16 @@ function SidebarContentView(props: {
       event.stopPropagation();
     } else if (name === "return" || name === "enter") {
       const current = d();
-      const items = current.sidebarView === "wis" ? current.workItems : current.qaFeedbacks;
+      const items = itemsForCurrentView(current);
       const targets = buildFocusTargets(items, current.collapsedStates);
       if (targets.length === 0) return;
       const idx = current.focusIndex;
       if (idx >= 0 && idx < targets.length) {
         const target = targets[idx];
         if (target.kind === "header") {
-          // Toggle collapse state
-          const newCollapsed = { ...current.collapsedStates };
-          const isCollapsed = newCollapsed[target.state] !== false;
-          newCollapsed[target.state] = !isCollapsed;
-          setCollapsedStates(newCollapsed);
-          // Recalculate targets to cap focusIndex after toggle
-          const newTargets = buildFocusTargets(items, newCollapsed);
-          const newFocus = Math.min(current.focusIndex, newTargets.length - 1);
-          setData((prev) => ({ ...prev, collapsedStates: newCollapsed, focusIndex: Math.max(0, newFocus) }));
+          toggleStateGroup(target.state, current.focusIndex);
         } else {
-          // Select the work item (existing behavior)
-          setSelectedWi(current.profileName, target.item.id);
-          setData((prev) => ({ ...prev, selectedWi: target.item }));
+          selectWorkItem(target.item);
         }
       }
       event.preventDefault();
@@ -470,7 +498,7 @@ function SidebarContentView(props: {
   focusSidebarList = () => {
     if (!listContainer) return;
     const current = d();
-    const items = current.sidebarView === "wis" ? current.workItems : current.qaFeedbacks;
+    const items = itemsForCurrentView(current);
     const targets = buildFocusTargets(items, current.collapsedStates);
     if (targets.length === 0) return;
     listContainer.focus();
@@ -521,7 +549,7 @@ function SidebarContentView(props: {
 
           {/* Keyboard hints for WI/QA navigation */}
           {(d().sidebarView === "wis" || d().sidebarView === "qa") && (
-            <text fg="gray">alt+w: focus list | j/k: navigate | enter: select/toggle | esc: blur</text>
+            <text fg="gray">alt+a: focus list (alt+w legacy) | j/k: navigate | enter: select/toggle | click headers: expand/collapse | esc: blur</text>
           )}
 
           {/* ── PRs View ── */}
@@ -536,13 +564,22 @@ function SidebarContentView(props: {
                     const voteIcon = pr.myVote === 10 ? "✓" : pr.myVote === -10 ? "✗" : pr.myVote === -5 ? "⏳" : pr.myVote === 5 ? "✓?" : "—";
                     const voteColor = pr.myVote === 10 ? "green" : pr.myVote === -10 ? "red" : pr.myVote === -5 ? "yellow" : "gray";
                     return (
-                      <text wrapMode="none" fg={sel ? "cyan" : undefined}>
-                        {sel ? "► " : "  "}
-                        {`#${String(pr.id)} ${pr.repo}/${pr.source} → ${pr.target}`}
-                        {" "}<span style={{ fg: voteColor }}>{voteIcon}</span>
-                        {" "}<span style={{ fg: "gray" }}>{`${pr.author} — ${pr.title}`}</span>
-                      </text>
-                    );
+                        <box
+                          flexDirection="row"
+                          focusable
+                          onMouseDown={() => {
+                            setSelectedPr(pr.repo, pr.id);
+                            setData((prev) => ({ ...prev, selectedPr: pr }));
+                          }}
+                        >
+                          <text wrapMode="none" fg={sel ? "cyan" : undefined}>
+                            {sel ? "► " : "  "}
+                            {`#${String(pr.id)} ${pr.repo}/${pr.source} → ${pr.target}`}
+                            {" "}<span style={{ fg: voteColor }}>{voteIcon}</span>
+                            {" "}<span style={{ fg: "gray" }}>{`${pr.author} — ${pr.title}`}</span>
+                          </text>
+                        </box>
+                      );
                   })}
                 </box>
               )}
@@ -554,13 +591,22 @@ function SidebarContentView(props: {
                   {d().myPRs.map((pr) => {
                     const sel = d().selectedPr?.id === pr.id && d().selectedPr?.repo === pr.repo;
                     return (
-                      <text wrapMode="none" fg={sel ? "cyan" : undefined}>
-                        {sel ? "► " : "  "}
-                        {`#${String(pr.id)} ${pr.repo}/${pr.source} → ${pr.target}`}
-                        {pr.isDraft ? <span style={{ fg: "gray" }}>{" [DRAFT]"}</span> : ""}
-                        {"  "}<span style={{ fg: "gray" }}>{pr.title}</span>
-                      </text>
-                    );
+                        <box
+                          flexDirection="row"
+                          focusable
+                          onMouseDown={() => {
+                            setSelectedPr(pr.repo, pr.id);
+                            setData((prev) => ({ ...prev, selectedPr: pr }));
+                          }}
+                        >
+                          <text wrapMode="none" fg={sel ? "cyan" : undefined}>
+                            {sel ? "► " : "  "}
+                            {`#${String(pr.id)} ${pr.repo}/${pr.source} → ${pr.target}`}
+                            {pr.isDraft ? <span style={{ fg: "gray" }}>{" [DRAFT]"}</span> : ""}
+                            {"  "}<span style={{ fg: "gray" }}>{pr.title}</span>
+                          </text>
+                        </box>
+                      );
                   })}
                 </box>
               )}
@@ -574,7 +620,7 @@ function SidebarContentView(props: {
 
           {/* Focusable list wrapper for WI/QA views */}
           <box
-            ref={(element: BoxRenderable) => { listContainer = element; if (!element) setListFocused(false); }}
+            ref={(element: BoxRenderable) => { if (element) listContainer = element; }}
             flexDirection="column"
             backgroundColor={listFocused() ? props.api.theme.current.backgroundPanel : undefined}
             focusable
@@ -597,10 +643,21 @@ function SidebarContentView(props: {
                       const marker = focused ? "> " : "  ";
                       const fg = focused ? "yellow" : getStateColor(target.state);
                       return (
-                        <text wrapMode="none" fg={fg}>
-                          {marker}
-                          <b>{`${icon} ${target.state} (${String(count)})`}</b>
-                        </text>
+                        <box
+                          flexDirection="row"
+                          focusable
+                          focused={idx === d().focusIndex}
+                          backgroundColor={focused ? props.api.theme.current.backgroundElement : undefined}
+                          onMouseDown={(event) => handleMouseAction(event, () => toggleStateGroup(target.state, idx))}
+                          onMouseOver={() => {
+                            setData((prev) => ({ ...prev, focusIndex: idx }));
+                          }}
+                        >
+                          <text wrapMode="none" fg={fg}>
+                            {marker}
+                            <b>{`${icon} ${target.state} (${String(count)})`}</b>
+                          </text>
+                        </box>
                       );
                     } else {
                       const wi = target.item;
@@ -609,11 +666,22 @@ function SidebarContentView(props: {
                       const marker = sel ? "  ► " : focused ? "  > " : "    ";
                       const fg = sel ? "cyan" : focused ? "yellow" : undefined;
                       return (
-                        <text wrapMode="none" fg={fg}>
-                          {marker}
-                          {`#${String(wi.id)} [${wi.type}] ${wi.state} — ${wi.title}`}
-                          {" "}<span style={{ fg: "gray" }}>{`P${String(wi.priority)} | ${wi.assignedTo}`}</span>
-                        </text>
+                        <box
+                          flexDirection="row"
+                          focusable
+                          focused={idx === d().focusIndex}
+                          backgroundColor={focused ? props.api.theme.current.backgroundElement : undefined}
+                          onMouseDown={(event) => handleMouseAction(event, () => selectWorkItem(wi))}
+                          onMouseOver={() => {
+                            setData((prev) => ({ ...prev, focusIndex: idx }));
+                          }}
+                        >
+                          <text wrapMode="none" fg={fg}>
+                            {marker}
+                            {`#${String(wi.id)} [${wi.type}] ${wi.state} — ${wi.title}`}
+                            {" "}<span style={{ fg: "gray" }}>{`P${String(wi.priority)} | ${wi.assignedTo}`}</span>
+                          </text>
+                        </box>
                       );
                     }
                   });
@@ -638,10 +706,21 @@ function SidebarContentView(props: {
                       const marker = focused ? "> " : "  ";
                       const fg = focused ? "yellow" : getStateColor(target.state);
                       return (
-                        <text wrapMode="none" fg={fg}>
-                          {marker}
-                          <b>{`${icon} ${target.state} (${String(count)})`}</b>
-                        </text>
+                        <box
+                          flexDirection="row"
+                          focusable
+                          focused={idx === d().focusIndex}
+                          backgroundColor={focused ? props.api.theme.current.backgroundElement : undefined}
+                          onMouseDown={(event) => handleMouseAction(event, () => toggleStateGroup(target.state, idx))}
+                          onMouseOver={() => {
+                            setData((prev) => ({ ...prev, focusIndex: idx }));
+                          }}
+                        >
+                          <text wrapMode="none" fg={fg}>
+                            {marker}
+                            <b>{`${icon} ${target.state} (${String(count)})`}</b>
+                          </text>
+                        </box>
                       );
                     } else {
                       const fb = target.item;
@@ -650,11 +729,22 @@ function SidebarContentView(props: {
                       const marker = sel ? "  ► " : focused ? "  > " : "    ";
                       const fg = sel ? "cyan" : focused ? "yellow" : undefined;
                       return (
-                        <text wrapMode="none" fg={fg}>
-                          {marker}
-                          {`#${String(fb.id)} [${fb.type}] ${fb.state} — ${fb.title}`}
-                          {" "}<span style={{ fg: "gray" }}>{`P${String(fb.priority)} | ${fb.assignedTo}`}</span>
-                        </text>
+                        <box
+                          flexDirection="row"
+                          focusable
+                          focused={idx === d().focusIndex}
+                          backgroundColor={focused ? props.api.theme.current.backgroundElement : undefined}
+                          onMouseDown={(event) => handleMouseAction(event, () => selectWorkItem(fb))}
+                          onMouseOver={() => {
+                            setData((prev) => ({ ...prev, focusIndex: idx }));
+                          }}
+                        >
+                          <text wrapMode="none" fg={fg}>
+                            {marker}
+                            {`#${String(fb.id)} [${fb.type}] ${fb.state} — ${fb.title}`}
+                            {" "}<span style={{ fg: "gray" }}>{`P${String(fb.priority)} | ${fb.assignedTo}`}</span>
+                          </text>
+                        </box>
                       );
                     }
                   });
@@ -955,20 +1045,34 @@ function registerCommands(
       });
     }
 
-    // ── Focus WI/QA List ──
-    commands.push({
-      title: "ADO: Focus WI/QA List",
-      value: "ado:focus-list",
-      keybind: "alt+w",
-      category: "ADO",
-      enabled: d.sidebarView === "wis" || d.sidebarView === "qa",
-      onSelect: () => {
+    const toggleFocusList = () => {
         if (isSidebarListFocused()) {
           blurSidebarList();
         } else {
           focusSidebarList();
         }
-      },
+    };
+
+    // ── Focus WI/QA List ──
+    commands.push({
+      title: "ADO: Focus WI/QA List",
+      value: "ado:focus-list",
+      keybind: "alt+a",
+      description: "Focus/blur the Work Items or QA Feedbacks list",
+      category: "ADO",
+      enabled: d.sidebarView === "wis" || d.sidebarView === "qa",
+      onSelect: toggleFocusList,
+    });
+
+    // Keep the old shortcut as a hidden compatibility alias.
+    commands.push({
+      title: "ADO: Focus WI/QA List (Alt+W legacy)",
+      value: "ado:focus-list-legacy-alt-w",
+      keybind: "alt+w",
+      category: "ADO",
+      hidden: true,
+      enabled: d.sidebarView === "wis" || d.sidebarView === "qa",
+      onSelect: toggleFocusList,
     });
 
     // ── Switch Profile ──
@@ -1010,6 +1114,8 @@ function registerCommands(
 // ─── TUI Plugin Export ─────────────────────────────────────────────────────
 
 export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
+  // Enable mouse support for clickable sidebar items
+  api.renderer.useMouse = true;
   const [data, setData] = createSignal<SidebarData>({
     status: "loading",
     profileName: "",
