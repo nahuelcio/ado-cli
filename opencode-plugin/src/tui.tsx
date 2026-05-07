@@ -33,7 +33,7 @@ import {
 } from "./shared.js";
 
 // Persistence stores (ESM — import from .js)
-import { getActiveProfile, setActiveProfile, getSelectedPr, setSelectedPr, clearSelectedPr, getSelectedWi, setSelectedWi, clearSelectedWi, getViewMode, setViewMode } from "./profile-store.js";
+import { getActiveProfile, setActiveProfile, getSelectedPr, setSelectedPr, clearSelectedPr, getSelectedWi, setSelectedWi, clearSelectedWi, getViewMode, setViewMode, getCollapsedStates, setCollapsedStates } from "./profile-store.js";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -60,6 +60,7 @@ interface SidebarData {
   sidebarView: "prs" | "wis" | "qa";
   view: "list" | "detail";
   focusIndex: number;
+  collapsedStates: Record<string, boolean>;
   filters?: { state?: string; assignedTo?: string };
   error?: string;
 }
@@ -99,7 +100,7 @@ async function fetchPRData(
   client: TuiPluginApi["client"],
   options?: unknown,
   filters?: { state?: string; assignedTo?: string },
-): Promise<Omit<SidebarData, "selectedPr" | "selectedWi" | "sidebarView" | "view" | "filters" | "focusIndex">> {
+): Promise<Omit<SidebarData, "selectedPr" | "selectedWi" | "sidebarView" | "view" | "filters" | "focusIndex" | "collapsedStates">> {
   const config = await readConfig(client, options);
   const { name, profile, count, names } = resolveProfile(config);
   const pat = getPATOptional(profile.patEnvVar);
@@ -193,6 +194,7 @@ async function fetchPRData(
   // Try fetching WIs (will fail gracefully for profiles without WI access)
   try {
     // Build WIQL query from filters or use default
+    const IMPORTANT_STATES = ['New', 'In Dev', 'Ready for QA', 'Accepted in QA', 'In QA'];
     let wiqlQuery: string;
     if (filters) {
       const clauses: string[] = [];
@@ -203,10 +205,12 @@ async function fetchPRData(
       }
       if (filters.state) {
         clauses.push(`[System.State] = '${filters.state.replace(/'/g, "''")}'`);
+      } else {
+        clauses.push(`[System.State] IN (${IMPORTANT_STATES.map(s => `'${s}'`).join(", ")})`);
       }
       wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE ${clauses.join(" AND ")} ORDER BY [System.ChangedDate] DESC`;
     } else {
-      wiqlQuery = "SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = @Me AND [System.State] <> 'Closed' ORDER BY [System.ChangedDate] DESC";
+      wiqlQuery = `SELECT [System.Id] FROM WorkItems WHERE [System.AssignedTo] = @Me AND [System.State] IN (${IMPORTANT_STATES.map(s => `'${s}'`).join(", ")}) ORDER BY [System.ChangedDate] DESC`;
     }
     const wiqlUrl = new URL(`${orgUrl}/${encodeURIComponent(profile.project)}/_apis/wit/wiql`);
     wiqlUrl.searchParams.set("api-version", WIQL_API_VERSION);
@@ -286,7 +290,7 @@ function allPrs(data: SidebarData): PRSummary[] {
 
 /** Auto-select: try persisted, then first PR, or null if empty. */
 function resolveSelection(
-  fetched: Omit<SidebarData, "selectedPr" | "selectedWi" | "sidebarView" | "view" | "focusIndex">,
+  fetched: Omit<SidebarData, "selectedPr" | "selectedWi" | "sidebarView" | "view" | "focusIndex" | "collapsedStates">,
 ): PRSummary | null {
   const all = [...fetched.assignedToMe, ...fetched.myPRs];
   if (all.length === 0) return null;
@@ -304,7 +308,7 @@ function resolveSelection(
 
 /** Auto-select WI: try persisted, then first WI, or null if empty. */
 function resolveWiSelection(
-  fetched: Omit<SidebarData, "selectedPr" | "selectedWi" | "sidebarView" | "view" | "focusIndex">,
+  fetched: Omit<SidebarData, "selectedPr" | "selectedWi" | "sidebarView" | "view" | "focusIndex" | "collapsedStates">,
   profileName: string,
 ): WorkItemSummary | null {
   if (fetched.workItems.length === 0) return null;
@@ -325,6 +329,67 @@ function resolveWiSelection(
 let focusSidebarList: () => void = () => {};
 let blurSidebarList: () => void = () => {};
 let isSidebarListFocused: () => boolean = () => false;
+
+// ─── State grouping helpers ────────────────────────────────────────────────
+
+type FocusTarget =
+  | { kind: "header"; state: string }
+  | { kind: "item"; state: string; itemIndex: number; item: WorkItemSummary };
+
+const STATE_PRIORITY: Record<string, number> = {
+  "In Dev": 0,
+  "New": 1,
+  "Ready for QA": 2,
+  "Accepted in QA": 3,
+  "In QA": 4,
+};
+
+const STATE_COLORS: Record<string, string> = {
+  "New": "green",
+  "In Dev": "yellow",
+  "Ready for QA": "magenta",
+  "Accepted in QA": "cyan",
+  "In QA": "blue",
+};
+
+function getStateColor(state: string): string {
+  return STATE_COLORS[state] ?? "gray";
+}
+
+function sortStatesByPriority(states: string[]): string[] {
+  return [...states].sort((a, b) => (STATE_PRIORITY[a] ?? 999) - (STATE_PRIORITY[b] ?? 999));
+}
+
+function groupItemsByState(items: WorkItemSummary[]): Record<string, WorkItemSummary[]> {
+  const groups: Record<string, WorkItemSummary[]> = {};
+  for (const item of items) {
+    if (!groups[item.state]) groups[item.state] = [];
+    groups[item.state].push(item);
+  }
+  return groups;
+}
+
+function buildFocusTargets(
+  items: WorkItemSummary[],
+  collapsed: Record<string, boolean>,
+): FocusTarget[] {
+  const groups = groupItemsByState(items);
+  const sortedStates = sortStatesByPriority(Object.keys(groups));
+  const targets: FocusTarget[] = [];
+
+  for (const state of sortedStates) {
+    targets.push({ kind: "header", state });
+    // Show items only when expanded (collapsed[state] === false)
+    if (collapsed[state] === false) {
+      const stateItems = groups[state];
+      for (let i = 0; i < stateItems.length; i++) {
+        targets.push({ kind: "item", state, itemIndex: i, item: stateItems[i] });
+      }
+    }
+  }
+
+  return targets;
+}
 
 // ─── Sidebar Content View ──────────────────────────────────────────────────
 
@@ -349,7 +414,8 @@ function SidebarContentView(props: {
       // move focusIndex down, wrap
       setData((prev) => {
         const items = prev.sidebarView === "wis" ? prev.workItems : prev.qaFeedbacks;
-        const count = items.length;
+        const targets = buildFocusTargets(items, prev.collapsedStates);
+        const count = targets.length;
         if (count === 0) return prev;
         return { ...prev, focusIndex: prev.focusIndex + 1 >= count ? 0 : prev.focusIndex + 1 };
       });
@@ -359,22 +425,36 @@ function SidebarContentView(props: {
       // move focusIndex up, wrap
       setData((prev) => {
         const items = prev.sidebarView === "wis" ? prev.workItems : prev.qaFeedbacks;
-        const count = items.length;
+        const targets = buildFocusTargets(items, prev.collapsedStates);
+        const count = targets.length;
         if (count === 0) return prev;
         return { ...prev, focusIndex: prev.focusIndex - 1 < 0 ? count - 1 : prev.focusIndex - 1 };
       });
       event.preventDefault();
       event.stopPropagation();
     } else if (name === "return" || name === "enter") {
-      // select highlighted item
       const current = d();
       const items = current.sidebarView === "wis" ? current.workItems : current.qaFeedbacks;
-      if (items.length === 0) return;
+      const targets = buildFocusTargets(items, current.collapsedStates);
+      if (targets.length === 0) return;
       const idx = current.focusIndex;
-      if (idx >= 0 && idx < items.length) {
-        const focused = items[idx];
-        setSelectedWi(current.profileName, focused.id);
-        setData((prev) => ({ ...prev, selectedWi: focused }));
+      if (idx >= 0 && idx < targets.length) {
+        const target = targets[idx];
+        if (target.kind === "header") {
+          // Toggle collapse state
+          const newCollapsed = { ...current.collapsedStates };
+          const isCollapsed = newCollapsed[target.state] !== false;
+          newCollapsed[target.state] = !isCollapsed;
+          setCollapsedStates(newCollapsed);
+          // Recalculate targets to cap focusIndex after toggle
+          const newTargets = buildFocusTargets(items, newCollapsed);
+          const newFocus = Math.min(current.focusIndex, newTargets.length - 1);
+          setData((prev) => ({ ...prev, collapsedStates: newCollapsed, focusIndex: Math.max(0, newFocus) }));
+        } else {
+          // Select the work item (existing behavior)
+          setSelectedWi(current.profileName, target.item.id);
+          setData((prev) => ({ ...prev, selectedWi: target.item }));
+        }
       }
       event.preventDefault();
       event.stopPropagation();
@@ -391,7 +471,8 @@ function SidebarContentView(props: {
     if (!listContainer) return;
     const current = d();
     const items = current.sidebarView === "wis" ? current.workItems : current.qaFeedbacks;
-    if (items.length === 0) return;
+    const targets = buildFocusTargets(items, current.collapsedStates);
+    if (targets.length === 0) return;
     listContainer.focus();
     setListFocused(true);
   };
@@ -440,7 +521,7 @@ function SidebarContentView(props: {
 
           {/* Keyboard hints for WI/QA navigation */}
           {(d().sidebarView === "wis" || d().sidebarView === "qa") && (
-            <text fg="gray">alt+w: focus list | j/k: navigate | enter: select | esc: blur</text>
+            <text fg="gray">alt+w: focus list | j/k: navigate | enter: select/toggle | esc: blur</text>
           )}
 
           {/* ── PRs View ── */}
@@ -504,19 +585,39 @@ function SidebarContentView(props: {
               <>
                 <text fg="yellow">{`Work Items Assigned to You (${String(d().workItems.length)})`}</text>
                 {d().workItems.length === 0 && <text fg="gray">No work items assigned</text>}
-                {d().workItems.map((wi, idx) => {
-                  const sel = d().selectedWi?.id === wi.id;
-                  const focused = idx === d().focusIndex;
-                  const marker = sel ? "► " : focused ? "> " : "  ";
-                  const fg = sel ? "cyan" : focused ? "yellow" : undefined;
-                  return (
-                    <text wrapMode="none" fg={fg}>
-                      {marker}
-                      {`#${String(wi.id)} [${wi.type}] ${wi.state} — ${wi.title}`}
-                      {" "}<span style={{ fg: "gray" }}>{`P${String(wi.priority)} | ${wi.assignedTo}`}</span>
-                    </text>
-                  );
-                })}
+                {d().workItems.length > 0 && (() => {
+                  const targets = buildFocusTargets(d().workItems, d().collapsedStates);
+                  const groups = groupItemsByState(d().workItems);
+                  return targets.map((target, idx) => {
+                    if (target.kind === "header") {
+                      const count = (groups[target.state] ?? []).length;
+                      const isCollapsed = d().collapsedStates[target.state] !== false;
+                      const icon = isCollapsed ? "▶" : "▼";
+                      const focused = idx === d().focusIndex;
+                      const marker = focused ? "> " : "  ";
+                      const fg = focused ? "yellow" : getStateColor(target.state);
+                      return (
+                        <text wrapMode="none" fg={fg}>
+                          {marker}
+                          <b>{`${icon} ${target.state} (${String(count)})`}</b>
+                        </text>
+                      );
+                    } else {
+                      const wi = target.item;
+                      const sel = d().selectedWi?.id === wi.id;
+                      const focused = idx === d().focusIndex;
+                      const marker = sel ? "  ► " : focused ? "  > " : "    ";
+                      const fg = sel ? "cyan" : focused ? "yellow" : undefined;
+                      return (
+                        <text wrapMode="none" fg={fg}>
+                          {marker}
+                          {`#${String(wi.id)} [${wi.type}] ${wi.state} — ${wi.title}`}
+                          {" "}<span style={{ fg: "gray" }}>{`P${String(wi.priority)} | ${wi.assignedTo}`}</span>
+                        </text>
+                      );
+                    }
+                  });
+                })()}
               </>
             )}
 
@@ -525,19 +626,39 @@ function SidebarContentView(props: {
               <>
                 <text fg="magenta">{`QA Feedbacks (${String(d().qaFeedbacks.length)})`}</text>
                 {d().qaFeedbacks.length === 0 && <text fg="gray">No QA Feedbacks</text>}
-                {d().qaFeedbacks.map((fb, idx) => {
-                  const sel = d().selectedWi?.id === fb.id;
-                  const focused = idx === d().focusIndex;
-                  const marker = sel ? "► " : focused ? "> " : "  ";
-                  const fg = sel ? "cyan" : focused ? "yellow" : undefined;
-                  return (
-                    <text wrapMode="none" fg={fg}>
-                      {marker}
-                      {`#${String(fb.id)} [${fb.type}] ${fb.state} — ${fb.title}`}
-                      {" "}<span style={{ fg: "gray" }}>{`P${String(fb.priority)} | ${fb.assignedTo}`}</span>
-                    </text>
-                  );
-                })}
+                {d().qaFeedbacks.length > 0 && (() => {
+                  const targets = buildFocusTargets(d().qaFeedbacks, d().collapsedStates);
+                  const groups = groupItemsByState(d().qaFeedbacks);
+                  return targets.map((target, idx) => {
+                    if (target.kind === "header") {
+                      const count = (groups[target.state] ?? []).length;
+                      const isCollapsed = d().collapsedStates[target.state] !== false;
+                      const icon = isCollapsed ? "▶" : "▼";
+                      const focused = idx === d().focusIndex;
+                      const marker = focused ? "> " : "  ";
+                      const fg = focused ? "yellow" : getStateColor(target.state);
+                      return (
+                        <text wrapMode="none" fg={fg}>
+                          {marker}
+                          <b>{`${icon} ${target.state} (${String(count)})`}</b>
+                        </text>
+                      );
+                    } else {
+                      const fb = target.item;
+                      const sel = d().selectedWi?.id === fb.id;
+                      const focused = idx === d().focusIndex;
+                      const marker = sel ? "  ► " : focused ? "  > " : "    ";
+                      const fg = sel ? "cyan" : focused ? "yellow" : undefined;
+                      return (
+                        <text wrapMode="none" fg={fg}>
+                          {marker}
+                          {`#${String(fb.id)} [${fb.type}] ${fb.state} — ${fb.title}`}
+                          {" "}<span style={{ fg: "gray" }}>{`P${String(fb.priority)} | ${fb.assignedTo}`}</span>
+                        </text>
+                      );
+                    }
+                  });
+                })()}
               </>
             )}
           </box>
@@ -903,6 +1024,7 @@ export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
     sidebarView: getViewMode(),
     view: "list",
     focusIndex: 0,
+    collapsedStates: getCollapsedStates(),
     filters: undefined,
   });
 
@@ -936,14 +1058,18 @@ export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
         // Persist sidebar view
         const persistedView = getViewMode();
 
-        // Cap focusIndex to new item count
+        // Preserve collapse state across refreshes
+        const currentCollapsed = data().collapsedStates;
+
+        // Cap focusIndex using focus targets (headers + visible items)
         const currentFocus = data().focusIndex;
-        const itemCount = persistedView === "wis"
-          ? fetched.workItems.length
+        const focusItems = persistedView === "wis"
+          ? fetched.workItems
           : persistedView === "qa"
-            ? fetched.qaFeedbacks.length
-            : 0;
-        const focusIndex = itemCount > 0 ? Math.min(currentFocus, itemCount - 1) : 0;
+            ? fetched.qaFeedbacks
+            : [];
+        const focusTargets = buildFocusTargets(focusItems, currentCollapsed);
+        const focusIndex = focusTargets.length > 0 ? Math.min(currentFocus, focusTargets.length - 1) : 0;
 
         setData({
           ...fetched,
@@ -952,6 +1078,7 @@ export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
           sidebarView: persistedView,
           view: "list",
           focusIndex,
+          collapsedStates: currentCollapsed,
           filters: currentFilters,
         });
       } catch (err) {
@@ -975,6 +1102,7 @@ export const tui: TuiPlugin = async (api: TuiPluginApi, options) => {
               sidebarView: getViewMode(),
               view: "list",
               focusIndex: 0,
+              collapsedStates: prev.collapsedStates,
               filters: prev.filters,
               error: err instanceof Error ? err.message : String(err),
             });

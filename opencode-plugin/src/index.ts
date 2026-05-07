@@ -721,7 +721,7 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
         description: "List work items from Azure DevOps. Supports filtering by state, assignedTo, and tag.",
         args: {
           state: z.string().optional().describe("Filter by work item state (e.g. Active, New, Resolved)"),
-          assignedTo: z.string().optional().describe("Filter by assigned user (shows ALL work items if not provided)"),
+          assignedTo: z.string().optional().describe("Filter by assigned user (defaults to @Me)"),
           tag: z.string().optional().describe("Filter by tag (WIQL CONTAINS match, e.g. 'bug', 'backend')"),
           profile: z.string().optional().describe("Optional profile name override"),
         },
@@ -731,6 +731,7 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
           // Build WIQL dynamically based on provided filters
           const conditions = [`[System.State] <> 'Closed'`];
           if (assignedTo) conditions.push(`[System.AssignedTo] = '${assignedTo}'`);
+          else conditions.push("[System.AssignedTo] = @Me");
           if (state) conditions.push(`[System.State] = '${state}'`);
           if (tag) conditions.push(`[System.Tags] CONTAINS '${tag}'`);
 
@@ -839,7 +840,7 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
         description: "List QA Feedback work items from Azure DevOps. Discovers the QA Feedback type name dynamically. Supports filtering by state and assignedTo.",
         args: {
           state: z.string().optional().describe("Filter by work item state (e.g. Active, New, Resolved)"),
-          assignedTo: z.string().optional().describe("Filter by assigned user (shows ALL QA feedbacks if not provided)"),
+          assignedTo: z.string().optional().describe("Filter by assigned user (defaults to @Me)"),
           profile: z.string().optional().describe("Optional profile name override"),
         },
         async execute({ state, assignedTo, profile }: { state?: string; assignedTo?: string; profile?: string }) {
@@ -860,6 +861,7 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
             `[System.State] <> 'Closed'`,
           ];
           if (assignedTo) conditions.push(`[System.AssignedTo] = '${assignedTo}'`);
+          else conditions.push("[System.AssignedTo] = @Me");
           if (state) conditions.push(`[System.State] = '${state}'`);
 
           const wiql = `SELECT [System.Id] FROM WorkItems WHERE ${conditions.join(" AND ")} ORDER BY [System.ChangedDate] DESC`;

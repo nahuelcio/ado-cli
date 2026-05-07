@@ -161,3 +161,34 @@ export function setViewMode(view: string): void {
     writeFileSync(SIDEBAR_VIEW_FILE, view, "utf-8");
   } catch { /* defensive */ }
 }
+
+// ─── Collapsed States ────────────────────────────────────────────────────────
+
+const COLLAPSED_STATES_FILE = join(STORE_DIR, "collapsed-states");
+
+/**
+ * Read the collapsed states from disk.
+ * Returns {} if the file is missing, empty, or unreadable (never throws).
+ * A state NOT in the record defaults to collapsed (true).
+ */
+export function getCollapsedStates(): Record<string, boolean> {
+  try {
+    if (!existsSync(COLLAPSED_STATES_FILE)) return {};
+    const content = readFileSync(COLLAPSED_STATES_FILE, "utf-8").trim();
+    if (!content) return {};
+    return JSON.parse(content) as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Persist the collapsed states to disk.
+ * Creates the store directory if it doesn't exist.
+ */
+export function setCollapsedStates(states: Record<string, boolean>): void {
+  try {
+    mkdirSync(STORE_DIR, { recursive: true });
+    writeFileSync(COLLAPSED_STATES_FILE, JSON.stringify(states), "utf-8");
+  } catch { /* defensive */ }
+}
