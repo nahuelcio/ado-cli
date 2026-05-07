@@ -40,12 +40,16 @@ import {
   fmtPR,
   fmtPRDetail,
   fmtThread,
+  fmtWorkItem,
+  fmtWorkItemDetail,
+  fmtQaFeedback,
+  fmtQaFeedbackDetail,
 } from "./shared.js";
-import { getActiveProfile, setActiveProfile, getSelectedPr, setSelectedPr, clearSelectedPr } from "./profile-store.js";
+import { getActiveProfile, setActiveProfile, getSelectedPr, setSelectedPr, clearSelectedPr, getSelectedWi, setSelectedWi, clearSelectedWi } from "./profile-store.js";
 
 // ─── ADO HTTP Client (minimal, inline) ────────────────────────────────────
 
-const API_VERSION = "7.1-preview.1";
+const API_VERSION = "7.1";
 
 class AdoClient {
   private authHeader: string;
@@ -58,10 +62,14 @@ class AdoClient {
     this.authHeader = "Basic " + Buffer.from(":" + pat).toString("base64");
   }
 
-  private buildUrl(endpoint: string, scope: "org" | "project" = "project"): string {
+  private buildUrl(
+    endpoint: string,
+    scope: "org" | "project" = "project",
+    apiVersion: string = API_VERSION,
+  ): string {
     if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) {
       const url = new URL(endpoint);
-      url.searchParams.set("api-version", API_VERSION);
+      url.searchParams.set("api-version", apiVersion);
       return url.toString();
     }
 
@@ -72,7 +80,7 @@ class AdoClient {
       ? endpoint
       : `/_apis${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
     const url = new URL(root + apiPath);
-    url.searchParams.set("api-version", API_VERSION);
+    url.searchParams.set("api-version", apiVersion);
     return url.toString();
   }
 
@@ -80,8 +88,9 @@ class AdoClient {
     endpoint: string,
     init?: RequestInit,
     scope: "org" | "project" = "project",
+    apiVersion?: string,
   ): Promise<T> {
-    const url = this.buildUrl(endpoint, scope);
+    const url = this.buildUrl(endpoint, scope, apiVersion);
     const res = await fetch(url, {
       ...init,
       headers: {
@@ -93,7 +102,8 @@ class AdoClient {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new Error(`ADO API ${res.status}: ${body.slice(0, 200)}`);
+      const truncated = body.length > 200 ? `${body.slice(0, 200)}...` : body;
+      throw new Error(`ADO API ${res.status} from ${url}: ${truncated}`);
     }
     return res.json() as Promise<T>;
   }
@@ -111,7 +121,8 @@ class AdoClient {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new Error(`ADO API ${res.status}: ${body.slice(0, 200)}`);
+      const truncated = body.length > 200 ? `${body.slice(0, 200)}...` : body;
+      throw new Error(`ADO API ${res.status} from ${url}: ${truncated}`);
     }
     return res.text();
   }
@@ -121,6 +132,7 @@ class AdoClient {
       "/connectionData",
       undefined,
       "org",
+      "7.1-preview.1",
     );
     return data.authenticatedUser;
   }
@@ -202,6 +214,95 @@ class AdoClient {
   async getPrSourceBranch(repo: string, prId: number): Promise<string> {
     const pr = await this.getPullRequest(repo, prId);
     return (pr.sourceRefName ?? "").replace("refs/heads/", "");
+  }
+
+  // ─── Work Item Tracking (WIT) methods ────────────────
+
+  async updateWorkItem(id: number, patchOps: Array<{ op: string; path: string; value: any }>): Promise<any> {
+    const url = this.buildUrl(`/_apis/wit/workitems/${id}`, "org");
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        Authorization: this.authHeader,
+        Accept: "application/json",
+        "Content-Type": "application/json-patch+json",
+      },
+      body: JSON.stringify(patchOps),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const truncated = body.length > 200 ? `${body.slice(0, 200)}...` : body;
+      throw new Error(`ADO API ${res.status} from ${url}: ${truncated}`);
+    }
+    return res.json();
+  }
+
+  async getWorkItemComments(id: number): Promise<any> {
+    const data = await this.request<{ value: any[] }>(
+      `/_apis/wit/workitems/${id}/comments`,
+      undefined,
+      "project",
+      "7.1-preview.2",
+    );
+    return data;
+  }
+
+  async addWorkItemComment(id: number, text: string): Promise<any> {
+    return this.request<any>(
+      `/_apis/wit/workitems/${id}/comments`,
+      {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      },
+      "project",
+      "7.1-preview.2",
+    );
+  }
+
+  async getWorkItemTypes(): Promise<any[]> {
+    const data = await this.request<{ value: any[] }>(
+      "/wit/workitemtypes",
+      undefined,
+      "project",
+    );
+    return data.value ?? [];
+  }
+
+  async queryWiql(wiql: string): Promise<{ workItems: Array<{ id: number }> }> {
+    const data = await this.request<{ workItems: Array<{ id: number }> }>(
+      "/wit/wiql",
+      {
+        method: "POST",
+        body: JSON.stringify({ query: wiql }),
+      },
+      "project",
+      "7.1-preview.2",
+    );
+    return data;
+  }
+
+  async getWorkItemsByIds(ids: number[], fields?: string[]): Promise<any[]> {
+    if (ids.length === 0) return [];
+    const defaultFields = [
+      "System.Id", "System.Title", "System.State", "System.WorkItemType",
+      "System.AssignedTo", "Microsoft.VSTS.Common.Priority", "System.ChangedDate",
+    ];
+    const fieldsParam = (fields ?? defaultFields).join(",");
+    const idsParam = ids.slice(0, 200).join(",");
+    const data = await this.request<{ value: any[] }>(
+      `/_apis/wit/workitems?ids=${idsParam}&fields=${fieldsParam}`,
+      undefined,
+      "org",
+    );
+    return data.value ?? [];
+  }
+
+  async getWorkItem(id: number): Promise<any> {
+    return this.request<any>(
+      `/_apis/wit/workitems/${id}`,
+      undefined,
+      "org",
+    );
   }
 }
 
@@ -610,6 +711,198 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
             out = out.slice(0, MAX_TOTAL) + "\n\n⚠ **Output truncated to fit context window. Use ado_pr_diff for file details or ado_pr_threads for full thread content.**\n";
           }
 
+          return out;
+        },
+      },
+
+      // ─── Work Item tools ──────────────────────────────────────────────
+
+      ado_work_items: {
+        description: "List work items from Azure DevOps. Supports filtering by state, assignedTo, and tag.",
+        args: {
+          state: z.string().optional().describe("Filter by work item state (e.g. Active, New, Resolved)"),
+          assignedTo: z.string().optional().describe("Filter by assigned user (shows ALL work items if not provided)"),
+          tag: z.string().optional().describe("Filter by tag (WIQL CONTAINS match, e.g. 'bug', 'backend')"),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ state, assignedTo, tag, profile }: { state?: string; assignedTo?: string; tag?: string; profile?: string }) {
+          const { client: ado, name } = await createClient(profile);
+
+          // Build WIQL dynamically based on provided filters
+          const conditions = [`[System.State] <> 'Closed'`];
+          if (assignedTo) conditions.push(`[System.AssignedTo] = '${assignedTo}'`);
+          if (state) conditions.push(`[System.State] = '${state}'`);
+          if (tag) conditions.push(`[System.Tags] CONTAINS '${tag}'`);
+
+          const wiql = `SELECT [System.Id] FROM WorkItems WHERE ${conditions.join(" AND ")} ORDER BY [System.ChangedDate] DESC`;
+          const wiqlResult = await ado.queryWiql(wiql);
+          const ids = (wiqlResult.workItems ?? []).map((wi: any) => wi.id);
+
+          // Build active filter label for header
+          const activeFilters: string[] = [];
+          if (assignedTo) activeFilters.push(`assignedTo=${assignedTo}`);
+          if (state) activeFilters.push(`state=${state}`);
+          if (tag) activeFilters.push(`tag=${tag}`);
+          const filterSuffix = activeFilters.length ? ` — ${activeFilters.join(", ")}` : "";
+
+          if (ids.length === 0) return `## Work Items (${name})${filterSuffix}\n\nNo work items found.`;
+          const workItems = await ado.getWorkItemsByIds(ids);
+          let out = `## Work Items (${name})${filterSuffix}\n\n`;
+          out += workItems.map(fmtWorkItem).join("\n");
+          out += `\n\n---\nTotal: ${workItems.length}`;
+          return out;
+        },
+      },
+
+      ado_work_item: {
+        description: "Show details and comments for a specific Azure DevOps work item.",
+        args: {
+          id: z.number().describe("Work item ID"),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ id, profile }: { id: number; profile?: string }) {
+          const { client: ado, name } = await createClient(profile);
+          const [wi, commentsData] = await Promise.all([
+            ado.getWorkItem(id),
+            ado.getWorkItemComments(id).catch(() => ({ value: [] })),
+          ]);
+          let out = `## Work Item #${id} (${name})\n\n${fmtWorkItemDetail(wi)}`;
+          const comments = commentsData.value ?? [];
+          if (comments.length) {
+            out += `\n## Comments (${comments.length})\n`;
+            for (const c of comments.slice(0, 10)) {
+              const author = c.author?.displayName ?? "?";
+              out += `- **${author}**: ${c.text?.slice(0, 200) ?? ""}\n`;
+            }
+          }
+          return out;
+        },
+      },
+
+      ado_work_item_update: {
+        description: "Update an Azure DevOps work item. Supports changing state, priority, and other fields via JSON Patch.",
+        args: {
+          id: z.number().describe("Work item ID"),
+          state: z.string().optional().describe("New state value (e.g. Active, Resolved, Closed)"),
+          priority: z.number().optional().describe("New priority value"),
+          comment: z.string().optional().describe("Optional comment to add with the update"),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ id, state, priority, comment, profile }: { id: number; state?: string; priority?: number; comment?: string; profile?: string }) {
+          const { client: ado, name } = await createClient(profile);
+          const patchOps: Array<{ op: string; path: string; value: any }> = [];
+          if (state) patchOps.push({ op: "replace", path: "/fields/System.State", value: state });
+          if (priority !== undefined) patchOps.push({ op: "replace", path: "/fields/Microsoft.VSTS.Common.Priority", value: priority });
+          if (patchOps.length === 0 && !comment) return "No changes specified. Provide --state, --priority, or --comment.";
+          if (patchOps.length > 0) await ado.updateWorkItem(id, patchOps);
+          if (comment) await ado.addWorkItemComment(id, comment);
+          let out = `## Work Item Updated\n\nWork Item: #${id}\n`;
+          if (state) out += `State: ${state}\n`;
+          if (priority !== undefined) out += `Priority: ${priority}\n`;
+          if (comment) out += `Comment added\n`;
+          return out;
+        },
+      },
+
+      ado_work_item_comment: {
+        description: "Add a comment to an Azure DevOps work item.",
+        args: {
+          id: z.number().describe("Work item ID"),
+          comment: z.string().describe("Comment text"),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ id, comment, profile }: { id: number; comment: string; profile?: string }) {
+          const { client: ado } = await createClient(profile);
+          await ado.addWorkItemComment(id, comment);
+          return `Comment added to work item #${id}.`;
+        },
+      },
+
+      ado_work_item_types: {
+        description: "List available work item types in the Azure DevOps project. Used to discover custom types like QA Feedback.",
+        args: { profile: z.string().optional().describe("Optional profile name override") },
+        async execute({ profile }: { profile?: string }) {
+          const { client: ado, name } = await createClient(profile);
+          const types = await ado.getWorkItemTypes();
+          let out = `## Work Item Types (${name})\n\n`;
+          for (const t of types) {
+            out += `- **${t.name}**: ${t.description ?? "No description"}\n`;
+          }
+          out += `\n---\nTotal: ${types.length} types`;
+          return out;
+        },
+      },
+
+      // ─── QA Feedback tools ────────────────────────────────────────────
+
+      ado_qa_feedbacks: {
+        description: "List QA Feedback work items from Azure DevOps. Discovers the QA Feedback type name dynamically. Supports filtering by state and assignedTo.",
+        args: {
+          state: z.string().optional().describe("Filter by work item state (e.g. Active, New, Resolved)"),
+          assignedTo: z.string().optional().describe("Filter by assigned user (shows ALL QA feedbacks if not provided)"),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ state, assignedTo, profile }: { state?: string; assignedTo?: string; profile?: string }) {
+          const { client: ado, name } = await createClient(profile);
+          // First discover QA feedback type name(s)
+          const types = await ado.getWorkItemTypes();
+          const qaTypes = types.filter((t: any) =>
+            t.name?.toLowerCase().includes("qa") ||
+            t.name?.toLowerCase().includes("feedback") ||
+            t.name?.toLowerCase().includes("test feedback"),
+          );
+          if (qaTypes.length === 0) return `## QA Feedbacks (${name})\n\nNo QA Feedback work item type found in this project.`;
+
+          // Build WIQL dynamically based on provided filters
+          const typeNames = qaTypes.map((t: any) => `'${t.name}'`).join(", ");
+          const conditions = [
+            `[System.WorkItemType] IN (${typeNames})`,
+            `[System.State] <> 'Closed'`,
+          ];
+          if (assignedTo) conditions.push(`[System.AssignedTo] = '${assignedTo}'`);
+          if (state) conditions.push(`[System.State] = '${state}'`);
+
+          const wiql = `SELECT [System.Id] FROM WorkItems WHERE ${conditions.join(" AND ")} ORDER BY [System.ChangedDate] DESC`;
+          const wiqlResult = await ado.queryWiql(wiql);
+          const ids = (wiqlResult.workItems ?? []).map((wi: any) => wi.id);
+
+          // Build active filter label for header
+          const activeFilters: string[] = [];
+          if (assignedTo) activeFilters.push(`assignedTo=${assignedTo}`);
+          if (state) activeFilters.push(`state=${state}`);
+          const filterSuffix = activeFilters.length ? ` — ${activeFilters.join(", ")}` : "";
+
+          if (ids.length === 0) return `## QA Feedbacks (${name})${filterSuffix}\n\nNo QA Feedbacks found.`;
+          const workItems = await ado.getWorkItemsByIds(ids);
+          let out = `## QA Feedbacks (${name})${filterSuffix}\n\n`;
+          out += `Types: ${typeNames}\n\n`;
+          out += workItems.map(fmtQaFeedback).join("\n");
+          out += `\n\n---\nTotal: ${workItems.length}`;
+          return out;
+        },
+      },
+
+      ado_qa_feedback: {
+        description: "Show details and comments for a QA Feedback work item.",
+        args: {
+          id: z.number().describe("Work item ID"),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ id, profile }: { id: number; profile?: string }) {
+          const { client: ado, name } = await createClient(profile);
+          const [wi, commentsData] = await Promise.all([
+            ado.getWorkItem(id),
+            ado.getWorkItemComments(id).catch(() => ({ value: [] })),
+          ]);
+          let out = `## QA Feedback #${id} (${name})\n\n${fmtQaFeedbackDetail(wi)}`;
+          const comments = commentsData.value ?? [];
+          if (comments.length) {
+            out += `\n## Comments (${comments.length})\n`;
+            for (const c of comments.slice(0, 10)) {
+              const author = c.author?.displayName ?? "?";
+              out += `- **${author}**: ${c.text?.slice(0, 200) ?? ""}\n`;
+            }
+          }
           return out;
         },
       },

@@ -45,11 +45,11 @@ describe("package metadata", () => {
   });
 
   it("stringifies numeric values before rendering them inside text nodes", () => {
-    expect(tuiSource).toContain("String(props.data().pendingReviews.length)");
-    expect(tuiSource).toContain("String(props.data().myPRs.length)");
+    expect(tuiSource).toContain("String(d().assignedToMe.length)");
+    expect(tuiSource).toContain("String(d().myPRs.length)");
     expect(tuiSource).toContain("String(pr.id)");
-    expect(tuiSource).toContain('<span style={{ fg: "gray" }}>{pr.author} — {pr.title}</span>');
-    expect(tuiSource).toContain('{pr.isDraft ? <span style={{ fg: "gray" }}> [DRAFT]</span> : ""}');
+    expect(tuiSource).toContain('<span style={{ fg: "gray" }}>{`${pr.author} — ${pr.title}`}</span>');
+    expect(tuiSource).toContain('{pr.isDraft ? <span style={{ fg: "gray" }}>{" [DRAFT]"}</span> : ""}');
     expect(tuiSource).not.toContain('<text fg="gray">{pr.author} — {pr.title}</text>');
   });
 

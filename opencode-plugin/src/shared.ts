@@ -17,6 +17,10 @@ export interface AdoProfile {
   patEnvVar: string;
   repos: string[];
   default?: boolean;
+  capabilities?: {
+    workItems?: boolean;
+    qaFeedbacks?: boolean;
+  };
 }
 
 export interface AdoConfig {
@@ -35,6 +39,21 @@ export interface PRSummary {
   /** Vote status if the current user is a reviewer: 0=none, 10=approved, 5=suggestions, -5=waiting, -10=rejected. undefined if not a reviewer. */
   myVote?: number;
 }
+
+export interface WorkItemSummary {
+  id: number;
+  title: string;
+  state: string;
+  type: string;        // System.WorkItemType (Bug, Task, User Story, etc.)
+  assignedTo: string;  // displayName
+  priority: number;    // Microsoft.VSTS.Common.Priority
+  changedDate?: string;
+  /** Reproduction steps for QA-related work items (Microsoft.VSTS.TCM.ReproSteps). */
+  reproSteps?: string;
+}
+
+/** QA Feedbacks ARE work items — same shape, different context. */
+export type QaFeedbackSummary = WorkItemSummary;
 
 // ─── Config helpers ───────────────────────────────────────────────────────
 
@@ -158,4 +177,48 @@ export function fmtThread(t: any): string {
   const status = t.status ?? "?";
   const firstComment = t.comments?.[0]?.content ?? "";
   return `- [${status}] ${file ? file + ": " : ""}${firstComment.slice(0, 120)}\n  (${t.comments?.length ?? 0} comments)`;
+}
+
+// ─── Work Item formatting helpers ────────────────────────────────────────
+
+/** Extract assigned-to display name from the ADO API identity field. */
+function wiAssignedTo(fields: any): string {
+  return fields?.["System.AssignedTo"]?.displayName ?? "Unassigned";
+}
+
+/** Format a work item as a single-line list entry. */
+export function fmtWorkItem(wi: any): string {
+  const id = wi.id ?? "?";
+  const title = wi.fields?.["System.Title"] ?? "?";
+  const type = wi.fields?.["System.WorkItemType"] ?? "?";
+  const state = wi.fields?.["System.State"] ?? "?";
+  const priority = wi.fields?.["Microsoft.VSTS.Common.Priority"] ?? "?";
+  const assigned = wiAssignedTo(wi.fields);
+  return `- #${id} ${title} [${type}] — State: ${state}, Priority: ${priority}, Assigned: ${assigned}`;
+}
+
+/** Format a work item as a detailed multi-line block. */
+export function fmtWorkItemDetail(wi: any): string {
+  let out = `id: ${wi.id}\n`;
+  out += `title: ${wi.fields?.["System.Title"] ?? "?"}\n`;
+  out += `type: ${wi.fields?.["System.WorkItemType"] ?? "?"}\n`;
+  out += `state: ${wi.fields?.["System.State"] ?? "?"}\n`;
+  out += `priority: ${wi.fields?.["Microsoft.VSTS.Common.Priority"] ?? "?"}\n`;
+  const assigned = wi.fields?.["System.AssignedTo"]?.displayName;
+  if (assigned) out += `assignedTo: ${assigned}\n`;
+  const changedDate = wi.fields?.["System.ChangedDate"];
+  if (changedDate) out += `changedDate: ${changedDate}\n`;
+  const reproSteps = wi.fields?.["Microsoft.VSTS.TCM.ReproSteps"];
+  if (reproSteps) out += `\nreproSteps: |\n  ${reproSteps.slice(0, 500)}\n`;
+  return out;
+}
+
+/** Format a QA Feedback work item as a single-line list entry. */
+export function fmtQaFeedback(fb: any): string {
+  return fmtWorkItem(fb);
+}
+
+/** Format a QA Feedback work item as a detailed multi-line block. */
+export function fmtQaFeedbackDetail(fb: any): string {
+  return fmtWorkItemDetail(fb);
 }

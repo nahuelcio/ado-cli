@@ -1,9 +1,11 @@
 /**
  * Persistent stores for the ADO plugin.
  *
- * Two stores at ~/.azure-devops-cli/:
+ * Four stores at ~/.azure-devops-cli/:
  *   - active-profile  — currently active profile name
  *   - selected-pr     — currently selected PR (format: repo:prId)
+ *   - selected-wi     — currently selected WI (format: profileName:wiId)
+ *   - sidebar-view    — current sidebar view mode (prs | wis | qa)
  *
  * All operations are synchronous and defensive — they never throw.
  */
@@ -15,6 +17,8 @@ import { homedir } from "node:os";
 const STORE_DIR = join(homedir(), ".azure-devops-cli");
 const PROFILE_FILE = join(STORE_DIR, "active-profile");
 const SELECTED_PR_FILE = join(STORE_DIR, "selected-pr");
+const SELECTED_WI_FILE = join(STORE_DIR, "selected-wi");
+const SIDEBAR_VIEW_FILE = join(STORE_DIR, "sidebar-view");
 
 // ─── Active Profile ────────────────────────────────────────────────────────
 
@@ -88,5 +92,72 @@ export function setSelectedPr(repo: string, prId: number): void {
 export function clearSelectedPr(): void {
   try {
     if (existsSync(SELECTED_PR_FILE)) writeFileSync(SELECTED_PR_FILE, "", "utf-8");
+  } catch { /* defensive */ }
+}
+
+// ─── Selected WI ────────────────────────────────────────────────────────────
+
+/**
+ * Read the selected WI from disk.
+ * Returns null if the file is missing, empty, or unreadable (never throws).
+ */
+export function getSelectedWi(): { profileName: string; wiId: number } | null {
+  try {
+    if (!existsSync(SELECTED_WI_FILE)) return null;
+    const content = readFileSync(SELECTED_WI_FILE, "utf-8").trim();
+    if (!content) return null;
+    const [profileName, idStr] = content.split(":");
+    const wiId = parseInt(idStr, 10);
+    if (!profileName || isNaN(wiId)) return null;
+    return { profileName, wiId };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist the selected WI to disk.
+ * Creates the store directory if it doesn't exist.
+ */
+export function setSelectedWi(profileName: string, wiId: number): void {
+  try {
+    mkdirSync(STORE_DIR, { recursive: true });
+    writeFileSync(SELECTED_WI_FILE, `${profileName}:${wiId}`, "utf-8");
+  } catch { /* defensive */ }
+}
+
+/** Clear the selected WI file. Silently ignores errors. */
+export function clearSelectedWi(): void {
+  try {
+    if (existsSync(SELECTED_WI_FILE)) writeFileSync(SELECTED_WI_FILE, "", "utf-8");
+  } catch { /* defensive */ }
+}
+
+// ─── Sidebar View ───────────────────────────────────────────────────────────
+
+/**
+ * Read the current sidebar view mode from disk.
+ * Returns "prs" if the file is missing, empty, or unreadable (never throws).
+ */
+export function getViewMode(): "prs" | "wis" | "qa" {
+  try {
+    if (!existsSync(SIDEBAR_VIEW_FILE)) return "prs";
+    const content = readFileSync(SIDEBAR_VIEW_FILE, "utf-8").trim();
+    if (!content) return "prs";
+    if (content === "wis" || content === "qa") return content;
+    return "prs";
+  } catch {
+    return "prs";
+  }
+}
+
+/**
+ * Persist the sidebar view mode to disk.
+ * Creates the store directory if it doesn't exist.
+ */
+export function setViewMode(view: string): void {
+  try {
+    mkdirSync(STORE_DIR, { recursive: true });
+    writeFileSync(SIDEBAR_VIEW_FILE, view, "utf-8");
   } catch { /* defensive */ }
 }
