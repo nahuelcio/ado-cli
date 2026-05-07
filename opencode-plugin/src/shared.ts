@@ -186,6 +186,16 @@ function wiAssignedTo(fields: any): string {
   return fields?.["System.AssignedTo"]?.displayName ?? "Unassigned";
 }
 
+function plainText(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  return String(value)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .trim();
+}
+
 /** Format a work item as a single-line list entry. */
 export function fmtWorkItem(wi: any): string {
   const id = wi.id ?? "?";
@@ -208,8 +218,11 @@ export function fmtWorkItemDetail(wi: any): string {
   if (assigned) out += `assignedTo: ${assigned}\n`;
   const changedDate = wi.fields?.["System.ChangedDate"];
   if (changedDate) out += `changedDate: ${changedDate}\n`;
+  const description = plainText(wi.fields?.["System.Description"]);
+  if (description) out += `\ndescription: |\n  ${description.slice(0, 2000).replace(/\n/g, "\n  ")}\n`;
   const reproSteps = wi.fields?.["Microsoft.VSTS.TCM.ReproSteps"];
-  if (reproSteps) out += `\nreproSteps: |\n  ${reproSteps.slice(0, 500)}\n`;
+  const plainReproSteps = plainText(reproSteps);
+  if (plainReproSteps) out += `\nreproSteps: |\n  ${plainReproSteps.slice(0, 2000).replace(/\n/g, "\n  ")}\n`;
   return out;
 }
 

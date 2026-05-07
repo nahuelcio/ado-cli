@@ -6,6 +6,7 @@ describe("package metadata", () => {
   const cliSource = readFileSync(new URL("../src/bin/opencode-ado.ts", import.meta.url), "utf-8");
   const tuiSource = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf-8");
   const serverSource = readFileSync(new URL("../src/index.ts", import.meta.url), "utf-8");
+  const sharedSource = readFileSync(new URL("../src/shared.ts", import.meta.url), "utf-8");
 
   it("publishes the TUI source expected by OpenCode", () => {
     expect(pkg.exports["./tui"].default).toBe("./dist/tui.tsx");
@@ -100,5 +101,13 @@ describe("package metadata", () => {
     expect(serverSource).toContain("expandRelations");
     expect(serverSource).toContain("formatWorkItemRelations");
     expect(serverSource).toContain("## Related Work Items");
+  });
+
+  it("supports full QA Feedback bundles for a related parent work item", () => {
+    expect(serverSource).toContain("ado_qa_feedbacks_for_work_item");
+    expect(serverSource).toContain("Use this before writing QA plan markdown files");
+    expect(serverSource).toContain("formatWorkItemFullDetail");
+    expect(serverSource).toContain("formatComments");
+    expect(sharedSource).toContain("System.Description");
   });
 });

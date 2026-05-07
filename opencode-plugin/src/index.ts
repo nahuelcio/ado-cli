@@ -280,8 +280,8 @@ class AdoClient {
     return data.value ?? [];
   }
 
-  async queryWiql(wiql: string): Promise<{ workItems: Array<{ id: number }> }> {
-    const data = await this.request<{ workItems: Array<{ id: number }> }>(
+  async queryWiql(wiql: string): Promise<{ workItems?: Array<{ id: number }>; workItemRelations?: Array<{ source?: { id: number }; target?: { id: number } }> }> {
+    const data = await this.request<{ workItems?: Array<{ id: number }>; workItemRelations?: Array<{ source?: { id: number }; target?: { id: number } }> }>(
       "/wit/wiql",
       {
         method: "POST",
@@ -388,6 +388,42 @@ async function formatWorkItemRelations(ado: AdoClient, wi: any): Promise<string>
 
 function commentList(commentsData: any): any[] {
   return commentsData?.comments ?? commentsData?.value ?? [];
+}
+
+function plainText(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  return String(value)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .trim();
+}
+
+function isQaFeedbackWorkItem(wi: any): boolean {
+  const type = String(wi?.fields?.["System.WorkItemType"] ?? "").toLowerCase();
+  return type.includes("qa") || type.includes("feedback") || type.includes("test feedback");
+}
+
+async function formatComments(ado: AdoClient, id: number): Promise<string> {
+  const commentsData = await ado.getWorkItemComments(id).catch(() => ({ value: [] }));
+  const comments = commentList(commentsData);
+  if (!comments.length) return "\n## Comments\n\nNo comments found.\n";
+  let out = `\n## Comments (${comments.length})\n`;
+  for (const c of comments.slice(0, 20)) {
+    const author = c.createdBy?.displayName ?? c.author?.displayName ?? "?";
+    const date = c.createdDate ?? c.date ?? "";
+    const text = plainText(c.text ?? c.renderedText).slice(0, 1000).replace(/\n/g, "\n  ");
+    out += `- **${author}**${date ? ` (${date})` : ""}: ${text}\n`;
+  }
+  return out;
+}
+
+async function formatWorkItemFullDetail(ado: AdoClient, wi: any, title: string): Promise<string> {
+  let out = `${title}\n\n${fmtWorkItemDetail(wi)}`;
+  out += await formatWorkItemRelations(ado, wi);
+  out += await formatComments(ado, wi.id);
+  return out;
 }
 
 // ─── Server Plugin ────────────────────────────────────────────────────────
@@ -855,21 +891,8 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
         },
         async execute({ id, profile }: { id: number; profile?: string }) {
           const { client: ado, name } = await createClient(profile);
-          const [wi, commentsData] = await Promise.all([
-            ado.getWorkItem(id, { expandRelations: true }),
-            ado.getWorkItemComments(id).catch(() => ({ value: [] })),
-          ]);
-          let out = `## Work Item #${id} (${name})\n\n${fmtWorkItemDetail(wi)}`;
-          out += await formatWorkItemRelations(ado, wi);
-          const comments = commentList(commentsData);
-          if (comments.length) {
-            out += `\n## Comments (${comments.length})\n`;
-            for (const c of comments.slice(0, 10)) {
-              const author = c.author?.displayName ?? "?";
-              out += `- **${author}**: ${c.text?.slice(0, 200) ?? ""}\n`;
-            }
-          }
-          return out;
+          const wi = await ado.getWorkItem(id, { expandRelations: true });
+          return formatWorkItemFullDetail(ado, wi, `## Work Item #${id} (${name})`);
         },
       },
 
@@ -984,19 +1007,51 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
         },
         async execute({ id, profile }: { id: number; profile?: string }) {
           const { client: ado, name } = await createClient(profile);
-          const [wi, commentsData] = await Promise.all([
-            ado.getWorkItem(id, { expandRelations: true }),
-            ado.getWorkItemComments(id).catch(() => ({ value: [] })),
-          ]);
-          let out = `## QA Feedback #${id} (${name})\n\n${fmtQaFeedbackDetail(wi)}`;
-          out += await formatWorkItemRelations(ado, wi);
-          const comments = commentList(commentsData);
-          if (comments.length) {
-            out += `\n## Comments (${comments.length})\n`;
-            for (const c of comments.slice(0, 10)) {
-              const author = c.author?.displayName ?? "?";
-              out += `- **${author}**: ${c.text?.slice(0, 200) ?? ""}\n`;
-            }
+          const wi = await ado.getWorkItem(id, { expandRelations: true });
+          return formatWorkItemFullDetail(ado, wi, `## QA Feedback #${id} (${name})`);
+        },
+      },
+
+      ado_qa_feedbacks_for_work_item: {
+        description: "List QA Feedbacks associated with a parent/related work item, including each feedback's full detail, comments, and relations. Use this before writing QA plan markdown files.",
+        args: {
+          id: z.number().describe("Parent or related work item ID, e.g. a User Story like 13494"),
+          state: z.string().optional().describe("Optional QA Feedback state filter (e.g. New, Active, Resolved)"),
+          profile: z.string().optional().describe("Optional profile name override"),
+        },
+        async execute({ id, state, profile }: { id: number; state?: string; profile?: string }) {
+          const { client: ado, name } = await createClient(profile);
+          const parent = await ado.getWorkItem(id, { expandRelations: true });
+          const relationIds = [
+            ...new Set((parent.relations ?? [])
+              .map((rel: any) => workItemIdFromUrl(rel.url))
+              .filter((relatedId: number | undefined) => relatedId !== undefined)),
+          ] as number[];
+
+          const relatedItems = relationIds.length
+            ? await ado.getWorkItemsByIds(relationIds, [
+              "System.Id", "System.Title", "System.State", "System.WorkItemType",
+              "System.AssignedTo", "Microsoft.VSTS.Common.Priority", "System.ChangedDate",
+            ])
+            : [];
+
+          let feedbacks = relatedItems.filter(isQaFeedbackWorkItem);
+          if (state) feedbacks = feedbacks.filter((wi: any) => wi.fields?.["System.State"] === state);
+
+          let out = `# QA Feedbacks associated with Work Item #${id} (${name})\n\n`;
+          out += `${fmtWorkItemDetail(parent)}\n`;
+          if (state) out += `Filter: state=${state}\n`;
+          out += `Total QA Feedbacks: ${feedbacks.length}\n\n`;
+          if (!feedbacks.length) return `${out}No QA Feedbacks found for this work item.\n`;
+
+          out += "## Summary\n\n";
+          for (const fb of feedbacks) out += fmtQaFeedback(fb) + "\n";
+
+          out += "\n## Details\n";
+          for (const fb of feedbacks) {
+            const full = await ado.getWorkItem(fb.id, { expandRelations: true });
+            out += "\n---\n\n";
+            out += await formatWorkItemFullDetail(ado, full, `### QA Feedback #${fb.id}`);
           }
           return out;
         },
