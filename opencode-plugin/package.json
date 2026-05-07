@@ -1,6 +1,6 @@
 {
   "name": "@nahuelcio/opencode-ado",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Azure DevOps plugin for OpenCode — PR reviews, profiles, sidebar panel",
   "type": "module",
   "main": "./dist/index.js",

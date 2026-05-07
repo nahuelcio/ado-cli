@@ -309,9 +309,10 @@ class AdoClient {
     return data.value ?? [];
   }
 
-  async getWorkItem(id: number): Promise<any> {
+  async getWorkItem(id: number, options?: { expandRelations?: boolean }): Promise<any> {
+    const expand = options?.expandRelations ? "?$expand=relations" : "";
     return this.request<any>(
-      `/_apis/wit/workitems/${id}`,
+      `/_apis/wit/workitems/${id}${expand}`,
       undefined,
       "org",
     );
@@ -330,6 +331,63 @@ function guessLang(path: string): string {
     yaml: "yaml", yml: "yaml", json: "json", xml: "xml", md: "markdown",
   };
   return map[ext] ?? "";
+}
+
+function wiqlLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function assignedToCondition(assignedTo?: string): string {
+  const normalized = assignedTo?.trim();
+  if (!normalized || normalized.toLowerCase() === "me" || normalized.toLowerCase() === "@me") {
+    return "[System.AssignedTo] = @Me";
+  }
+  return `[System.AssignedTo] = ${wiqlLiteral(normalized)}`;
+}
+
+function filterLabel(value?: string): string {
+  if (!value || value.trim().toLowerCase() === "me" || value.trim().toLowerCase() === "@me") return "@Me";
+  return value.trim();
+}
+
+function workItemIdFromUrl(url?: string): number | undefined {
+  const match = url?.match(/\/workItems\/(\d+)$/i);
+  return match ? Number(match[1]) : undefined;
+}
+
+function relationLabel(rel: any): string {
+  return rel?.attributes?.name ?? rel?.rel ?? "Related";
+}
+
+async function formatWorkItemRelations(ado: AdoClient, wi: any): Promise<string> {
+  const relations = (wi.relations ?? [])
+    .map((rel: any) => ({ rel, id: workItemIdFromUrl(rel.url) }))
+    .filter((item: { id?: number }) => item.id !== undefined) as Array<{ rel: any; id: number }>;
+  if (!relations.length) return "\n## Related Work Items\n\nNo related work items found.\n";
+
+  const relatedIds = [...new Set(relations.map((r) => r.id))];
+  const relatedItems = await ado.getWorkItemsByIds(relatedIds, [
+    "System.Id", "System.Title", "System.State", "System.WorkItemType", "System.AssignedTo",
+  ]).catch(() => []);
+  const byId = new Map(relatedItems.map((item: any) => [item.id, item]));
+
+  let out = "\n## Related Work Items\n";
+  for (const relation of relations) {
+    const related = byId.get(relation.id);
+    if (related) {
+      const title = related.fields?.["System.Title"] ?? "?";
+      const type = related.fields?.["System.WorkItemType"] ?? "?";
+      const state = related.fields?.["System.State"] ?? "?";
+      out += `- #${relation.id} ${title} [${type}] — State: ${state}, Relation: ${relationLabel(relation.rel)}\n`;
+    } else {
+      out += `- #${relation.id} — Relation: ${relationLabel(relation.rel)}\n`;
+    }
+  }
+  return out;
+}
+
+function commentList(commentsData: any): any[] {
+  return commentsData?.comments ?? commentsData?.value ?? [];
 }
 
 // ─── Server Plugin ────────────────────────────────────────────────────────
@@ -765,10 +823,9 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
 
           // Build WIQL dynamically based on provided filters
           const conditions = [`[System.State] <> 'Closed'`];
-          if (assignedTo) conditions.push(`[System.AssignedTo] = '${assignedTo}'`);
-          else conditions.push("[System.AssignedTo] = @Me");
-          if (state) conditions.push(`[System.State] = '${state}'`);
-          if (tag) conditions.push(`[System.Tags] CONTAINS '${tag}'`);
+          conditions.push(assignedToCondition(assignedTo));
+          if (state) conditions.push(`[System.State] = ${wiqlLiteral(state)}`);
+          if (tag) conditions.push(`[System.Tags] CONTAINS ${wiqlLiteral(tag)}`);
 
           const wiql = `SELECT [System.Id] FROM WorkItems WHERE ${conditions.join(" AND ")} ORDER BY [System.ChangedDate] DESC`;
           const wiqlResult = await ado.queryWiql(wiql);
@@ -776,7 +833,7 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
 
           // Build active filter label for header
           const activeFilters: string[] = [];
-          if (assignedTo) activeFilters.push(`assignedTo=${assignedTo}`);
+          activeFilters.push(`assignedTo=${filterLabel(assignedTo)}`);
           if (state) activeFilters.push(`state=${state}`);
           if (tag) activeFilters.push(`tag=${tag}`);
           const filterSuffix = activeFilters.length ? ` — ${activeFilters.join(", ")}` : "";
@@ -799,11 +856,12 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
         async execute({ id, profile }: { id: number; profile?: string }) {
           const { client: ado, name } = await createClient(profile);
           const [wi, commentsData] = await Promise.all([
-            ado.getWorkItem(id),
+            ado.getWorkItem(id, { expandRelations: true }),
             ado.getWorkItemComments(id).catch(() => ({ value: [] })),
           ]);
           let out = `## Work Item #${id} (${name})\n\n${fmtWorkItemDetail(wi)}`;
-          const comments = commentsData.value ?? [];
+          out += await formatWorkItemRelations(ado, wi);
+          const comments = commentList(commentsData);
           if (comments.length) {
             out += `\n## Comments (${comments.length})\n`;
             for (const c of comments.slice(0, 10)) {
@@ -895,9 +953,8 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
             `[System.WorkItemType] IN (${typeNames})`,
             `[System.State] <> 'Closed'`,
           ];
-          if (assignedTo) conditions.push(`[System.AssignedTo] = '${assignedTo}'`);
-          else conditions.push("[System.AssignedTo] = @Me");
-          if (state) conditions.push(`[System.State] = '${state}'`);
+          conditions.push(assignedToCondition(assignedTo));
+          if (state) conditions.push(`[System.State] = ${wiqlLiteral(state)}`);
 
           const wiql = `SELECT [System.Id] FROM WorkItems WHERE ${conditions.join(" AND ")} ORDER BY [System.ChangedDate] DESC`;
           const wiqlResult = await ado.queryWiql(wiql);
@@ -905,7 +962,7 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
 
           // Build active filter label for header
           const activeFilters: string[] = [];
-          if (assignedTo) activeFilters.push(`assignedTo=${assignedTo}`);
+          activeFilters.push(`assignedTo=${filterLabel(assignedTo)}`);
           if (state) activeFilters.push(`state=${state}`);
           const filterSuffix = activeFilters.length ? ` — ${activeFilters.join(", ")}` : "";
 
@@ -928,11 +985,12 @@ const server: Plugin = async (input: PluginInput, options?: PluginOptions): Prom
         async execute({ id, profile }: { id: number; profile?: string }) {
           const { client: ado, name } = await createClient(profile);
           const [wi, commentsData] = await Promise.all([
-            ado.getWorkItem(id),
+            ado.getWorkItem(id, { expandRelations: true }),
             ado.getWorkItemComments(id).catch(() => ({ value: [] })),
           ]);
           let out = `## QA Feedback #${id} (${name})\n\n${fmtQaFeedbackDetail(wi)}`;
-          const comments = commentsData.value ?? [];
+          out += await formatWorkItemRelations(ado, wi);
+          const comments = commentList(commentsData);
           if (comments.length) {
             out += `\n## Comments (${comments.length})\n`;
             for (const c of comments.slice(0, 10)) {

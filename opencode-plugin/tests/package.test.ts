@@ -92,4 +92,13 @@ describe("package metadata", () => {
     expect(serverSource).toContain("## QA Feedback Updated");
     expect(serverSource).toContain("Comment added to QA Feedback");
   });
+
+  it("maps assignedTo=me to @Me and includes related work items in WI/QA details", () => {
+    expect(serverSource).toContain("function assignedToCondition");
+    expect(serverSource).toContain('normalized.toLowerCase() === "me"');
+    expect(serverSource).toContain("[System.AssignedTo] = @Me");
+    expect(serverSource).toContain("expandRelations");
+    expect(serverSource).toContain("formatWorkItemRelations");
+    expect(serverSource).toContain("## Related Work Items");
+  });
 });
