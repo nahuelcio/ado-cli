@@ -955,7 +955,11 @@ function registerCommands(
                 options={options}
                 current={currentKey}
                 onSelect={(option: { value: string }) => {
-                  const [repo, idStr] = option.value.split(":");
+                  // Split on last ":" only, in case repo name contains ":"
+                  const lastColonIdx = option.value.lastIndexOf(":");
+                  if (lastColonIdx === -1) return;
+                  const repo = option.value.slice(0, lastColonIdx);
+                  const idStr = option.value.slice(lastColonIdx + 1);
                   const prId = parseInt(idStr, 10);
                   const found = prList.find((p) => p.repo === repo && p.id === prId);
                   if (found) {

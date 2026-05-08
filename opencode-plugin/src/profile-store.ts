@@ -68,7 +68,11 @@ export function getSelectedPr(): { repo: string; prId: number } | null {
     if (!existsSync(SELECTED_PR_FILE)) return null;
     const content = readFileSync(SELECTED_PR_FILE, "utf-8").trim();
     if (!content) return null;
-    const [repo, idStr] = content.split(":");
+    // Split on last ":" only, in case repo name contains ":"
+    const lastColonIdx = content.lastIndexOf(":");
+    if (lastColonIdx === -1) return null;
+    const repo = content.slice(0, lastColonIdx);
+    const idStr = content.slice(lastColonIdx + 1);
     const prId = parseInt(idStr, 10);
     if (!repo || isNaN(prId)) return null;
     return { repo, prId };
@@ -106,7 +110,11 @@ export function getSelectedWi(): { profileName: string; wiId: number } | null {
     if (!existsSync(SELECTED_WI_FILE)) return null;
     const content = readFileSync(SELECTED_WI_FILE, "utf-8").trim();
     if (!content) return null;
-    const [profileName, idStr] = content.split(":");
+    // Split on last ":" only, in case profile name contains ":"
+    const lastColonIdx = content.lastIndexOf(":");
+    if (lastColonIdx === -1) return null;
+    const profileName = content.slice(0, lastColonIdx);
+    const idStr = content.slice(lastColonIdx + 1);
     const wiId = parseInt(idStr, 10);
     if (!profileName || isNaN(wiId)) return null;
     return { profileName, wiId };
