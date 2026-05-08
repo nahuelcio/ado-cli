@@ -338,7 +338,7 @@ async function runInit(_cwd: string): Promise<number> {
   // ── Step 1: Organization ──────────────────────────────────────────
   console.log(`  ${bold("Organization")}`);
   console.log("  Your Azure DevOps org URL or name.");
-  console.log("  Examples: yoizen, https://dev.azure.com/yoizen, https://yoizen.visualstudio.com");
+  console.log("  Examples: myorg, https://dev.azure.com/myorg, https://myorg.visualstudio.com");
   const org = await ask("Organization URL or name");
   if (!org) { console.log(yellow("  ✗ Organization is required")); return 1; }
 
