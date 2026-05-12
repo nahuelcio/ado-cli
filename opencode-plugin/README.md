@@ -2,9 +2,11 @@
 
 [![npm version](https://badge.fury.io/js/%40nahuelcio%2Fopencode-ado.svg)](https://www.npmjs.org/package/@nahuelcio/opencode-ado)
 
-Azure DevOps plugin for **OpenCode** with server tools + TUI sidebar.
+Azure DevOps plugin for **OpenCode** + **Pi**.
 
 ## Install
+
+### OpenCode
 
 ```bash
 npx @nahuelcio/opencode-ado init
@@ -14,6 +16,18 @@ This wizard:
 - stores your PAT in `~/.azure-devops-cli/pat`
 - registers the server plugin in `~/.config/opencode/opencode.json`
 - registers the sidebar plugin in `~/.config/opencode/tui.json`
+
+### Pi
+
+```bash
+pi install npm:@nahuelcio/opencode-ado
+```
+
+Then create config with:
+
+```bash
+/ado:config
+```
 
 ## CLI
 
@@ -31,6 +45,8 @@ node dist/bin/opencode-ado.js sync-local
 ```
 
 ## Configuration
+
+### OpenCode (`~/.config/opencode/opencode.json`)
 
 The plugin config is stored in OpenCode as plugin options:
 
@@ -55,6 +71,29 @@ The plugin config is stored in OpenCode as plugin options:
   ]
 }
 ```
+
+### Pi (`~/.azure-devops-cli/config.json` or `.pi/settings.json`)
+
+```jsonc
+{
+  "ado": {
+    "defaultProfile": "work",
+    "profiles": {
+      "work": {
+        "org": "https://dev.azure.com/myorg",
+        "project": "myproject",
+        "patEnvVar": "AZURE_DEVOPS_PAT",
+        "repos": ["backend", "frontend"]
+      }
+    }
+  }
+}
+```
+
+Pi config lookup order:
+1. `.pi/settings.json` (project-local)
+2. `~/.pi/agent/settings.json` (global)
+3. `~/.azure-devops-cli/config.json` (shared fallback)
 
 ## Authentication
 
@@ -88,6 +127,13 @@ PAT resolution order:
 - `ado_work_item_types`
 - `ado_related_work_items`
 
+## Pi Commands
+
+- `/ado:status` — show ADO connection status
+- `/ado:profiles` — list configured profiles
+- `/ado:switch` — switch active profile
+- `/ado:config` — write config template to `~/.azure-devops-cli/config.json`
+
 ## Development
 
 ```bash
@@ -103,5 +149,5 @@ MIT
 ## Links
 
 - [npm package](https://www.npmjs.org/package/@nahuelcio/opencode-ado)
-- [GitHub repository](https://github.com/nahuelcio/ado-plugin)
+- [GitHub repository](https://github.com/nahuelcio/azure-devops-cli-go)
 - [Azure DevOps docs](https://learn.microsoft.com/azure/devops/)
