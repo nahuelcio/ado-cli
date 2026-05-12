@@ -154,5 +154,5 @@ Nahuel Cioffi
 ## Links
 
 - [npm Package](https://www.npmjs.org/package/@nahuelcio/opencode-ado)
-- [GitHub Repository](https://github.com/nahuelcio/ado-cli)
+- [GitHub Repository](https://github.com/nahuelcio/ado-plugin)
 - [Azure DevOps Documentation](https://learn.microsoft.com/azure/devops/)

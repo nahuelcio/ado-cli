@@ -103,5 +103,5 @@ MIT
 ## Links
 
 - [npm package](https://www.npmjs.org/package/@nahuelcio/opencode-ado)
-- [GitHub repository](https://github.com/nahuelcio/azure-devops-cli-go)
+- [GitHub repository](https://github.com/nahuelcio/ado-plugin)
 - [Azure DevOps docs](https://learn.microsoft.com/azure/devops/)
