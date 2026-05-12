@@ -7,6 +7,7 @@ describe("package metadata", () => {
   const tuiSource = readFileSync(new URL("../src/tui.tsx", import.meta.url), "utf-8");
   const serverSource = readFileSync(new URL("../src/index.ts", import.meta.url), "utf-8");
   const sharedSource = readFileSync(new URL("../src/shared.ts", import.meta.url), "utf-8");
+  const adoClientSource = readFileSync(new URL("../src/ado-client.ts", import.meta.url), "utf-8");
 
   it("publishes the TUI source expected by OpenCode", () => {
     expect(pkg.exports["./tui"].default).toBe("./dist/tui.tsx");
@@ -83,37 +84,37 @@ describe("package metadata", () => {
   it("supports standalone PR comments including optional file/line context", () => {
     expect(serverSource).toContain("ado_pr_comment");
     expect(serverSource).toContain("filePath");
-    expect(serverSource).toContain("rightFileStart");
+    expect(adoClientSource).toContain("rightFileStart");
     expect(serverSource).toContain("Provide filePath when specifying line.");
   });
 
   it("supports generic work item tools with explicit workItemType filtering", () => {
     expect(serverSource).toContain("ado_work_items");
     expect(serverSource).toContain("workItemType");
-    expect(serverSource).toContain("[System.WorkItemType] =");
-    expect(serverSource).toContain("workItemType=");
+    expect(serverSource).toContain("[System.WorkItemType] LIKE");
+    expect(serverSource).toContain("workItemType");
   });
 
   it("uses the documented WIT comments endpoint/version for QA feedback comments", () => {
-    expect(serverSource).toContain('WIT_COMMENTS_API_VERSION = "7.1-preview.4"');
-    expect(serverSource).toContain("`/_apis/wit/workItems/${id}/comments`");
-    expect(serverSource).not.toContain("`/_apis/wit/workitems/${id}/comments`");
+    expect(adoClientSource).toContain('WIT_COMMENTS_API_VERSION = "7.1-preview.4"');
+    expect(adoClientSource).toContain("`/_apis/wit/workItems/${id}/comments`");
+    expect(adoClientSource).not.toContain("`/_apis/wit/workitems/${id}/comments`");
   });
 
   it("maps assignedTo=me to @Me and includes related work items in WI/QA details", () => {
-    expect(serverSource).toContain("function assignedToCondition");
-    expect(serverSource).toContain('normalized.toLowerCase() === "me"');
-    expect(serverSource).toContain("[System.AssignedTo] = @Me");
-    expect(serverSource).toContain("expandRelations");
-    expect(serverSource).toContain("formatWorkItemRelations");
-    expect(serverSource).toContain("## Related Work Items");
+    expect(adoClientSource).toContain("function assignedToCondition");
+    expect(adoClientSource).toContain('normalized.toLowerCase() === "me"');
+    expect(adoClientSource).toContain("[System.AssignedTo] = @Me");
+    expect(adoClientSource).toContain("expandRelations");
+    expect(adoClientSource).toContain("formatWorkItemRelations");
+    expect(adoClientSource).toContain("## Related");
   });
 
   it("supports full related work item bundles for a parent work item", () => {
     expect(serverSource).toContain("ado_related_work_items");
-    expect(serverSource).toContain("Related Work Items for");
-    expect(serverSource).toContain("formatWorkItemFullDetail");
-    expect(serverSource).toContain("formatComments");
+    expect(serverSource).toContain("## Related for #");
+    expect(adoClientSource).toContain("formatWorkItemFullDetail");
+    expect(adoClientSource).toContain("formatComments");
     expect(sharedSource).toContain("System.Description");
   });
 });

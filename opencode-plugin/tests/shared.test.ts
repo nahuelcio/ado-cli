@@ -99,13 +99,14 @@ describe("PR formatting", () => {
     const result = fmtPR(samplePR);
     expect(result).toContain("#123");
     expect(result).toContain("Fix bug in authentication");
-    expect(result).toContain("web-api: feature-auth → main by John Doe");
+    expect(result).toContain("web-api feature-auth→main");
+    expect(result).toContain("@John Doe");
   });
 
   it("includes [DRAFT] for draft PRs", () => {
     const draftPR = { ...samplePR, isDraft: true };
     const result = fmtPR(draftPR);
-    expect(result).toContain("[DRAFT]");
+    expect(result).toContain("[D]");
   });
 });
 
@@ -126,10 +127,10 @@ describe("Work item formatting", () => {
     const result = fmtWorkItem(sampleWorkItem);
     expect(result).toContain("#456");
     expect(result).toContain("Implement login feature");
-    expect(result).toContain("[User Story]");
-    expect(result).toContain("State: New");
-    expect(result).toContain("Priority: 2");
-    expect(result).toContain("Assigned: Jane Smith");
+    expect(result).toContain("[US]");
+    expect(result).toContain("New");
+    expect(result).toContain("P2");
+    expect(result).toContain("@Jane");
   });
 });
 

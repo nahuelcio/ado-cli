@@ -1,7 +1,7 @@
 {
   "name": "@nahuelcio/opencode-ado",
-  "version": "0.4.3",
-  "description": "Azure DevOps plugin for OpenCode — PR reviews, profiles, sidebar panel",
+  "version": "0.4.4",
+  "description": "Azure DevOps plugin for OpenCode/Pi — PR reviews, profiles, sidebar panel",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -41,7 +41,7 @@
     "@opentui/core": "^0.2.2",
     "@opentui/solid": "^0.2.2",
     "solid-js": "^1.9.10",
-    "zod": "^4.1.8"
+    "zod": "4.1.8"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "^1.4.3",
@@ -57,6 +57,11 @@
     "typebox": "^1.1.38",
     "typescript": "^5.8.0",
     "vitest": "^4.0.17"
+  },
+  "overrides": {
+    "glob": "^13.0.0",
+    "node-domexception": "^2.0.0",
+    "zod": "4.1.8"
   },
   "engines": {
     "node": ">=18.0.0"

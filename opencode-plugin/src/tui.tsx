@@ -817,7 +817,7 @@ function registerCommands(
   setData: (fn: (prev: SidebarData) => SidebarData) => void,
   refresh: () => Promise<void>,
 ): () => void {
-  const unsub = api.command.register(() => {
+  const unsub = api.command?.register(() => {
     const d = data();
     const commands: Array<{
       title: string;
@@ -1112,7 +1112,7 @@ function registerCommands(
     return commands;
   });
 
-  return unsub;
+  return unsub ?? (() => {});
 }
 
 // ─── TUI Plugin Export ─────────────────────────────────────────────────────
